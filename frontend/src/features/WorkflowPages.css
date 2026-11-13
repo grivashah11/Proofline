@@ -1394,3 +1394,48 @@
     margin-left: 41px;
   }
 }
+
+.manual-claim-panel {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0 18px;
+}
+
+.manual-claim-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border, rgba(164, 137, 255, 0.22));
+  border-radius: 16px;
+  background: rgba(115, 83, 190, 0.06);
+}
+
+.manual-claim-form > div:first-child p {
+  margin: 5px 0 0;
+  color: var(--muted, #a6a0b8);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.manual-claim-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.manual-claim-form .workflow-field {
+  display: grid;
+  gap: 7px;
+}
+
+.manual-claim-form input,
+.manual-claim-form textarea,
+.manual-claim-form select {
+  width: 100%;
+}
+
+@media (max-width: 680px) {
+  .manual-claim-grid {
+    grid-template-columns: 1fr;
+  }
+}

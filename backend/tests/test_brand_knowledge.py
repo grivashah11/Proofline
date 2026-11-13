@@ -16,10 +16,12 @@ def test_brand_rule_normalizes_text():
         rule_kind=BrandRuleKind.BRAND_VOICE,
         title="  Brand Voice  ",
         rule_text="  Use warm language.  ",
+        tone_examples="  Do: friendly and direct.  ",
     )
 
     assert rule.title == "Brand Voice"
     assert rule.rule_text == "Use warm language."
+    assert rule.tone_examples == "Do: friendly and direct."
 
 
 def test_brand_rule_rejects_blank_title():
@@ -95,4 +97,13 @@ def test_terminology_update_rejects_unknown_fields():
         TermEntryUpdate(
             term="approved term",
             unknown_field="not allowed",
+        )
+
+
+def test_brand_voice_requires_tone_examples():
+    with pytest.raises(ValidationError):
+        BrandRuleCreate(
+            rule_kind=BrandRuleKind.BRAND_VOICE,
+            title="Friendly voice",
+            rule_text="Use warm, direct language.",
         )

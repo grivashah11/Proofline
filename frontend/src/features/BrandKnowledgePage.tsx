@@ -47,6 +47,7 @@ type BrandRuleRecord = {
   title: string
   description: string | null
   rule_text: string
+  tone_examples: string
   channel: string | null
   state: BrandRuleState
   check_type: BrandRuleCheckType
@@ -76,6 +77,7 @@ type RuleDraft = {
   title: string
   description: string
   rule_text: string
+  tone_examples: string
   channel: string
   check_type: BrandRuleCheckType
   check_value: string
@@ -101,6 +103,7 @@ const initialRuleDraft = (): RuleDraft => ({
   title: '',
   description: '',
   rule_text: '',
+  tone_examples: '',
   channel: '',
   check_type: 'manual_review',
   check_value: '',
@@ -344,6 +347,7 @@ export default function BrandKnowledgePage({
       title: rule.title,
       description: rule.description ?? '',
       rule_text: rule.rule_text,
+      tone_examples: rule.tone_examples ?? '',
       channel: rule.channel ?? '',
       check_type: rule.check_type,
       check_value: rule.check_value ?? '',
@@ -394,6 +398,7 @@ export default function BrandKnowledgePage({
       title: ruleDraft.title.trim(),
       description: ruleDraft.description.trim() || null,
       rule_text: ruleDraft.rule_text.trim(),
+      tone_examples: ruleDraft.tone_examples.trim(),
       channel: ruleDraft.channel.trim() || null,
       check_type: ruleDraft.check_type,
       check_value: ruleDraft.check_value.trim() || null,
@@ -671,6 +676,13 @@ export default function BrandKnowledgePage({
                     <p>{rule.rule_text}</p>
                   </div>
 
+                  {rule.rule_kind === 'brand_voice' && rule.tone_examples && (
+                    <div className="bk-rule-text">
+                      <span>TONE EXAMPLES</span>
+                      <p>{rule.tone_examples}</p>
+                    </div>
+                  )}
+
                   <div className="bk-meta-row">
                     <span>
                       <CircleDashed size={14} />
@@ -939,6 +951,23 @@ export default function BrandKnowledgePage({
                       required
                     />
                   </label>
+
+                  {ruleDraft.rule_kind === 'brand_voice' && (
+                    <label>
+                      Tone examples *
+                      <textarea
+                        value={ruleDraft.tone_examples}
+                        onChange={(event) =>
+                          setRuleDraft({ ...ruleDraft, tone_examples: event.target.value })
+                        }
+                        placeholder={'Do: “Made for everyday adventures.”\nAvoid: “The ultimate product for everyone!”'}
+                        rows={3}
+                        maxLength={5000}
+                        required
+                      />
+                      <small>Give reviewers concrete examples of the voice to follow. These are reference examples, not an automatic tone score.</small>
+                    </label>
+                  )}
 
                   <div className="bk-form-grid">
                     <label>

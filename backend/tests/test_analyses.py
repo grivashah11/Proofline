@@ -120,9 +120,59 @@ class AnalysisTestGateway:
         raise AssertionError(f"Unexpected resource: {resource}")
 
     async def rpc(self, function_name, payload):
-        assert function_name == "save_content_analysis"
-
         now = datetime.now(UTC).isoformat()
+
+        if function_name == "add_manual_claim_to_analysis":
+            if self.analysis is None or self.analysis["id"] != payload["p_analysis_id"]:
+                raise HTTPException(status_code=404, detail="Analysis not found")
+            if payload["p_revision_id"] != str(self.revision_id):
+                raise HTTPException(status_code=409, detail="Revision is stale")
+
+            candidate = payload["p_candidate_claim"]
+            duplicate = any(
+                finding.get("candidate_claim", {}).get("exact_text") == candidate["exact_text"]
+                and finding.get("candidate_claim", {}).get("subject") == candidate["subject"]
+                and finding.get("candidate_claim", {}).get("attribute") == candidate["attribute"]
+                for finding in self.findings
+                if isinstance(finding.get("candidate_claim"), dict)
+            )
+            if duplicate:
+                raise HTTPException(status_code=409, detail="Claim already exists")
+
+            finding = {
+                "id": str(uuid4()),
+                "workspace_id": str(self.workspace_id),
+                "analysis_run_id": self.analysis["id"],
+                "revision_id": str(self.revision_id),
+                "finding_number": len(self.findings) + 1,
+                "source": "ai_claim",
+                "source_id": None,
+                "category": "claim",
+                "outcome": "needs_verification",
+                "severity": "warning",
+                "title": "Manually added claim needs verification",
+                "message": "Manually added candidate claim requires human verification.",
+                "recommended_action": "Ask the Brand Owner to verify the claim before approval.",
+                "start_index": payload["p_start_index"],
+                "end_index": payload["p_end_index"],
+                "matched_text": candidate["exact_text"],
+                "source_span_verified": True,
+                "candidate_claim": candidate,
+                "passport_id": None,
+                "passport_version_id": None,
+                "passport_version_number": None,
+                "approved_wording": None,
+                "evidence_source_title": None,
+                "evidence_source_url": None,
+                "evidence_reference": None,
+                "evidence_excerpt": None,
+                "created_at": now,
+            }
+            self.findings.append(finding)
+            self.analysis["claim_needs_verification_count"] += 1
+            return {"analysis": self.analysis, "findings": self.findings}
+
+        assert function_name == "save_content_analysis"
         analysis_id = uuid4()
 
         self.analysis = {
@@ -347,6 +397,63 @@ def test_analysis_rejects_non_member(analysis_client):
     response = client.post(analysis_url(gateway))
 
     assert response.status_code == 404
+
+
+def test_manual_claim_adds_missed_excerpt_for_verification(analysis_client, monkeypatch):
+    client, gateway = analysis_client
+
+    async def fake_extract_claims(client, settings, content):
+        return AIClaimExtraction(claims=[])
+
+    monkeypatch.setattr(analysis_endpoint, "extract_claims", fake_extract_claims)
+    created = client.post(analysis_url(gateway))
+    assert created.status_code == 201
+    analysis_id = created.json()["analysis"]["id"]
+
+    response = client.post(
+        f"{analysis_url(gateway)}/{analysis_id}/manual-claims",
+        json={
+            "exact_text": "Our test product keeps drinks cold for 24 hours.",
+            "subject": "Test product",
+            "attribute": "cold retention",
+            "claim_kind": "factual",
+            "numeric_value": "24",
+            "unit": "hours",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["analysis"]["claim_needs_verification_count"] == 1
+    assert len(result["findings"]) == 1
+    finding = result["findings"][0]
+    assert finding["outcome"] == "needs_verification"
+    assert finding["source_span_verified"] is True
+    assert finding["candidate_claim"]["extraction_note"].startswith("Manually added")
+
+
+def test_manual_claim_rejects_excerpt_not_in_current_revision(analysis_client, monkeypatch):
+    client, gateway = analysis_client
+
+    async def fake_extract_claims(client, settings, content):
+        return AIClaimExtraction(claims=[])
+
+    monkeypatch.setattr(analysis_endpoint, "extract_claims", fake_extract_claims)
+    created = client.post(analysis_url(gateway))
+    analysis_id = created.json()["analysis"]["id"]
+
+    response = client.post(
+        f"{analysis_url(gateway)}/{analysis_id}/manual-claims",
+        json={
+            "exact_text": "This sentence is not in the draft.",
+            "subject": "Test product",
+            "attribute": "cold retention",
+            "claim_kind": "factual",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "exactly match" in response.json()["detail"]
 
 
 def test_retrieve_analysis_returns_saved_findings(

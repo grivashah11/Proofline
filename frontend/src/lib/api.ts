@@ -36,7 +36,12 @@ export async function apiRequest<T>(
   const headers = new Headers(options.headers)
   headers.set('Accept', 'application/json')
 
-  if (options.body && !headers.has('Content-Type')) {
+  // Let the browser set the multipart boundary for FormData uploads.
+  if (
+    options.body &&
+    !(typeof FormData !== 'undefined' && options.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -89,4 +94,49 @@ export async function apiRequest<T>(
   }
 
   return payload as T
+}
+
+export async function apiRequestBlob(path: string): Promise<Blob> {
+  const headers = new Headers({ Accept: 'image/*' })
+
+  if (supabase) {
+    const { data, error } = await supabase.auth.getSession()
+
+    if (error) {
+      throw new Error(`Unable to read sign-in session: ${error.message}`)
+    }
+
+    const accessToken = data.session?.access_token
+    if (accessToken) {
+      headers.set('Authorization', `Bearer ${accessToken}`)
+    }
+  }
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  let response: Response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${normalizedPath}`, { headers })
+  } catch {
+    throw new Error(
+      'Could not reach the Proofline backend. Check that the API server is running.',
+    )
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') ?? ''
+    const payload: unknown = contentType.includes('application/json')
+      ? await response.json()
+      : await response.text()
+
+    throw new ApiError(
+      getErrorMessage(
+        payload,
+        `The image request failed with status ${response.status}.`,
+      ),
+      response.status,
+    )
+  }
+
+  return response.blob()
 }

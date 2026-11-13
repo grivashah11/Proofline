@@ -21,6 +21,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth-context'
 import {
   addComment,
+  addManualClaim,
   createContent,
   createRevision,
   getAnalysis,
@@ -34,6 +35,7 @@ import {
   outcomeLabel,
   submitForReview,
   type AnalysisDetail,
+  type ManualClaimInput,
   type ContentComment,
   type ContentDetail,
   type ContentRecord,
@@ -417,6 +419,7 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
                       <div><strong>{analysis.analysis.claim_needs_verification_count + analysis.analysis.claim_review_due_count}</strong><span>Need verification</span></div>
                     </div>
                     {analysis.analysis.ai_extraction_status === 'unavailable' && <div className="workflow-notice workflow-notice--warning"><CircleAlert size={16} />AI claim extraction was unavailable for this run. Deterministic brand checks are still shown; do not treat the absence of extracted claims as proof that all claims are supported.</div>}
+                    {canEdit && <ManualClaimPanel workspaceId={workspaceId} contentId={detail.content.id} analysisId={analysis.analysis.id} onAdded={(updated) => { setAnalysis(updated); setSuccess('The missed claim was added and marked for verification.'); }} />}
                     {analysis.findings.length === 0 ? <div className="workflow-inline-empty"><CheckCircle2 size={18} /><div><strong>No findings were returned</strong><p>This run did not identify any configured issues. Human review is still required.</p></div></div> : (
                       <div className="finding-list">
                         {analysis.findings.map((finding) => (
@@ -457,6 +460,94 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
           )}
         </section>
       </div>
+    </div>
+  )
+}
+
+type ManualClaimPanelProps = {
+  workspaceId: string
+  contentId: string
+  analysisId: string
+  onAdded: (analysis: AnalysisDetail) => void
+}
+
+function ManualClaimPanel({ workspaceId, contentId, analysisId, onAdded }: ManualClaimPanelProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    exact_text: '',
+    subject: '',
+    attribute: '',
+    claim_kind: 'factual' as ManualClaimInput['claim_kind'],
+    value_text: '',
+    numeric_value: '',
+    unit: '',
+    qualifier: '',
+    conditions: '',
+  })
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setSaving(true)
+
+    const payload: ManualClaimInput = {
+      exact_text: form.exact_text.trim(),
+      subject: form.subject.trim(),
+      attribute: form.attribute.trim(),
+      claim_kind: form.claim_kind,
+      value_text: form.value_text.trim() || null,
+      numeric_value: form.numeric_value.trim() || null,
+      unit: form.unit.trim() || null,
+      qualifier: form.qualifier.trim() || null,
+      conditions: form.conditions.trim() || null,
+    }
+
+    try {
+      const updated = await addManualClaim(workspaceId, contentId, analysisId, payload)
+      onAdded(updated)
+      setForm({
+        exact_text: '', subject: '', attribute: '', claim_kind: 'factual',
+        value_text: '', numeric_value: '', unit: '', qualifier: '', conditions: '',
+      })
+      setExpanded(false)
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="manual-claim-panel">
+      <button className="button button-secondary" type="button" onClick={() => setExpanded((value) => !value)}>
+        <FilePlus2 size={16} /> {expanded ? 'Close manual claim form' : 'Add a missed claim manually'}
+      </button>
+      {expanded && (
+        <form className="manual-claim-form" onSubmit={handleSubmit}>
+          <div>
+            <strong>Add a candidate claim</strong>
+            <p>Copy the exact wording from the current draft. Proofline will save it as <b>Needs verification</b>; adding it manually does not approve the claim.</p>
+          </div>
+          <label className="workflow-field">
+            Exact claim excerpt *
+            <textarea rows={3} maxLength={3000} required value={form.exact_text} onChange={(event) => setForm({ ...form, exact_text: event.target.value })} placeholder="Paste the exact sentence or phrase from the draft..." />
+          </label>
+          <div className="manual-claim-grid">
+            <label className="workflow-field">Subject *<input required maxLength={300} value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="e.g. Hydro Flask bottle" /></label>
+            <label className="workflow-field">Attribute *<input required maxLength={300} value={form.attribute} onChange={(event) => setForm({ ...form, attribute: event.target.value })} placeholder="e.g. cold retention" /></label>
+            <label className="workflow-field">Claim type<select value={form.claim_kind} onChange={(event) => setForm({ ...form, claim_kind: event.target.value as ManualClaimInput['claim_kind'] })}><option value="factual">Factual</option><option value="promotional">Promotional</option></select></label>
+            <label className="workflow-field">Claimed value<input maxLength={500} value={form.value_text} onChange={(event) => setForm({ ...form, value_text: event.target.value })} placeholder="e.g. 24" /></label>
+            <label className="workflow-field">Numeric value<input maxLength={50} value={form.numeric_value} onChange={(event) => setForm({ ...form, numeric_value: event.target.value })} placeholder="e.g. 24" /></label>
+            <label className="workflow-field">Unit<input maxLength={80} value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value })} placeholder="e.g. hours" /></label>
+          </div>
+          <label className="workflow-field">Qualifier (optional)<input maxLength={500} value={form.qualifier} onChange={(event) => setForm({ ...form, qualifier: event.target.value })} placeholder="e.g. up to" /></label>
+          <label className="workflow-field">Conditions (optional)<textarea rows={2} maxLength={1000} value={form.conditions} onChange={(event) => setForm({ ...form, conditions: event.target.value })} placeholder="Any stated conditions or limitations..." /></label>
+          {error && <div className="workflow-notice workflow-notice--warning" role="alert">{error}</div>}
+          <div className="workflow-actions"><button className="button button-secondary" type="button" onClick={() => setExpanded(false)}>Cancel</button><button className="button button-primary" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin-icon" size={15} /> : <CheckCircle2 size={15} />} Add claim for verification</button></div>
+        </form>
+      )}
     </div>
   )
 }

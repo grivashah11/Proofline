@@ -123,7 +123,7 @@ async def update_brand_rule(
         "GET",
         "brand_rules",
         params={
-            "select": "rule_kind,check_type,check_value",
+            "select": "rule_kind,check_type,check_value,tone_examples",
             "id": f"eq.{rule_id}",
             "workspace_id": f"eq.{workspace_id}",
             "limit": "1",
@@ -137,6 +137,17 @@ async def update_brand_rule(
         )
 
     current = existing[0]
+
+    final_rule_kind = updates.get("rule_kind", current["rule_kind"])
+    final_tone_examples = updates.get("tone_examples", current.get("tone_examples", "")) or ""
+    if final_rule_kind == "brand_voice" and not final_tone_examples.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Brand voice rules must include at least one tone example.",
+        )
+
+    if "tone_examples" in updates and updates["tone_examples"] is None:
+        updates["tone_examples"] = ""
 
     try:
         validate_brand_rule_configuration(

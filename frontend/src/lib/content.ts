@@ -112,6 +112,21 @@ export type AnalysisDetail = {
   findings: AnalysisFinding[]
 }
 
+export type ManualClaimInput = {
+  exact_text: string
+  subject: string
+  attribute: string
+  claim_kind: 'factual' | 'promotional'
+  value_text: string | null
+  numeric_value: string | null
+  unit: string | null
+  qualifier: string | null
+  conditions: string | null
+  product_scope?: string | null
+  channel_scope?: string | null
+  market_scope?: string | null
+}
+
 export type ReviewDecisionRecord = {
   id: string
   workspace_id: string
@@ -217,6 +232,18 @@ export function runAnalysis(workspaceId: string, contentId: string) {
   return apiRequest<AnalysisDetail>(`${contentPath(workspaceId, contentId)}/analyses`, {
     method: 'POST',
   })
+}
+
+export function addManualClaim(
+  workspaceId: string,
+  contentId: string,
+  analysisId: string,
+  payload: ManualClaimInput,
+) {
+  return apiRequest<AnalysisDetail>(
+    `${contentPath(workspaceId, contentId)}/analyses/${analysisId}/manual-claims`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  )
 }
 
 export function submitForReview(workspaceId: string, contentId: string) {

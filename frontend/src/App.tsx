@@ -13,6 +13,7 @@ import {
   EyeOff,
   FileCheck2,
   LayoutDashboard,
+  Image as ImageIcon,
   LoaderCircle,
   LogOut,
   Menu,
@@ -40,6 +41,7 @@ import ClaimPassportsPage from './features/ClaimPassportsPage'
 import ContentReviewsPage from './features/ContentReviewsPage'
 import ReviewQueuePage from './features/ReviewQueuePage'
 import TeamPage from './features/TeamPage'
+import ImagesPage from './features/ImagesPage'
 import { useAuth } from './lib/auth-context'
 import {
   createWorkspace,
@@ -68,6 +70,7 @@ const navItems: NavItem[] = [
   { label: 'Content reviews', to: '/content', icon: FileCheck2 },
   { label: 'Review queue', to: '/reviews', icon: UsersRound },
   { label: 'Team members', to: '/team', icon: UsersRound },
+  { label: 'Images & assets', to: '/images', icon: ImageIcon },
 ]
 
 const quickLinks: {
@@ -893,6 +896,10 @@ function AppLayout({
                 <Route
                   path="/team"
                   element={<TeamPage workspaceId={selected.workspace.id} role={selected.role} />}
+                />
+                <Route
+                  path="/images"
+                  element={<ImagesPage workspaceId={selected.workspace.id} role={selected.role} />}
                 />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>

@@ -238,6 +238,12 @@ def run_rule_engine(
 
         if check_type == "manual_review":
             needs_review_count += 1
+            tone_examples = (rule.get("tone_examples") or "").strip()
+            message = f"This brand rule requires human review. Guidance: {explanation}"
+            if tone_examples:
+                message += f" Tone examples supplied by the Brand Owner: {tone_examples}"
+            if len(message) > 4800:
+                message = message[:4797].rstrip() + "..."
 
             _append_finding(
                 findings,
@@ -247,11 +253,10 @@ def run_rule_engine(
                 outcome=FindingOutcome.NEEDS_REVIEW,
                 severity=FindingSeverity.INFO,
                 title=title,
-                message=(
-                    f"This brand rule requires human review. Guidance: {explanation}"
-                ),
+                message=message,
                 recommended_action=(
-                    "Review the draft against this approved brand guidance."
+                    "Compare the draft with the approved guidance and examples. "
+                    "These examples are references for human review, not an automatic tone score."
                 ),
             )
             continue

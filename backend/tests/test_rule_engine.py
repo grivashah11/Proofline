@@ -35,12 +35,14 @@ def brand_rule(
     *,
     rule_kind: str = "messaging",
     channel: str | None = None,
+    tone_examples: str = "",
 ) -> dict:
     return {
         "id": str(uuid4()),
         "rule_kind": rule_kind,
         "title": "Test brand rule",
         "rule_text": "Test brand guidance.",
+        "tone_examples": tone_examples,
         "channel": channel,
         "check_type": check_type,
         "check_value": check_value,
@@ -271,10 +273,12 @@ def test_manual_review_rule_is_not_automatically_rejected():
                 "manual_review",
                 None,
                 rule_kind="brand_voice",
+                tone_examples="Do: friendly and direct. Avoid: exaggerated promises.",
             )
         ],
     )
 
+    assert "Tone examples supplied by the Brand Owner" in result.findings[0].message
     assert result.needs_review_count == 1
     assert result.conflict_count == 0
     assert result.findings[0].outcome.value == "needs_review"

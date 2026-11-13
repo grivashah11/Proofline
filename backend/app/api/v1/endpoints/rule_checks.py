@@ -67,7 +67,7 @@ async def check_content(
         "GET",
         "brand_rules",
         params={
-            "select": ("id,rule_kind,title,rule_text,channel,check_type,check_value"),
+            "select": ("id,rule_kind,title,rule_text,tone_examples,channel,check_type,check_value"),
             "workspace_id": f"eq.{workspace_id}",
             "state": "eq.active",
             "order": "created_at.asc",

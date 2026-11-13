@@ -19,7 +19,8 @@ from app.schemas.analysis import (
 )
 from app.services.ai.openai_client import extract_claims
 from app.services.analysis_service import build_analysis_findings
-from app.services.claim_matcher import match_claims, normalize_text
+from app.schemas.manual_claims import ManualClaimCreate
+from app.services.claim_matcher import locate_exact_excerpt, match_claims, normalize_text
 from app.services.rule_engine import run_rule_engine
 
 router = APIRouter(
@@ -161,7 +162,7 @@ async def load_analysis_knowledge(
         "GET",
         "brand_rules",
         params={
-            "select": "id,rule_kind,title,rule_text,channel,check_type,check_value",
+            "select": "id,rule_kind,title,rule_text,tone_examples,channel,check_type,check_value",
             "workspace_id": f"eq.{workspace_id}",
             "state": "eq.active",
             "order": "created_at.asc",
@@ -368,6 +369,95 @@ async def create_content_analysis(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Analysis storage returned invalid analysis records.",
+        ) from None
+
+
+@router.post(
+    "/{analysis_id}/manual-claims",
+    response_model=AnalysisDetail,
+    summary="Add a missed candidate claim to the current analysis",
+)
+async def add_manual_claim(
+    workspace_id: UUID,
+    content_id: UUID,
+    analysis_id: UUID,
+    data: ManualClaimCreate,
+    auth: AuthDependency,
+    gateway: GatewayDependency,
+) -> AnalysisDetail:
+    """Add a verbatim claim omitted by AI extraction.
+
+    A manually added claim is deliberately persisted as `needs_verification`.
+    Supplying candidate fields does not independently validate the claim or
+    authorise it for publication.
+    """
+    await require_workspace_member(workspace_id, auth, gateway)
+
+    content = await get_content_or_404(workspace_id, content_id, gateway)
+    if content.get("status") not in {"draft", "changes_requested"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Manual claims can only be added to editable drafts.",
+        )
+
+    revision = await get_current_revision(workspace_id, content, gateway)
+    analysis_records = await gateway.request(
+        "GET",
+        "analysis_runs",
+        params={
+            "select": "id,workspace_id,content_id,revision_id",
+            "id": f"eq.{analysis_id}",
+            "workspace_id": f"eq.{workspace_id}",
+            "content_id": f"eq.{content_id}",
+            "limit": "1",
+        },
+    )
+    if not analysis_records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Analysis run not found.",
+        )
+    if str(analysis_records[0].get("revision_id")) != str(revision["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Manual claims can only be added to an analysis of the current revision. Run checks again.",
+        )
+
+    start_index, end_index, _ = locate_exact_excerpt(
+        revision["content_text"],
+        data.exact_text,
+    )
+    if start_index is None or end_index is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The claim excerpt must exactly match a contiguous part of the current draft.",
+        )
+
+    result = await gateway.rpc(
+        "add_manual_claim_to_analysis",
+        {
+            "p_workspace_id": str(workspace_id),
+            "p_content_id": str(content_id),
+            "p_analysis_id": str(analysis_id),
+            "p_revision_id": str(revision["id"]),
+            "p_candidate_claim": data.to_candidate_claim(),
+            "p_start_index": start_index,
+            "p_end_index": end_index,
+        },
+    )
+
+    if not isinstance(result, dict):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Manual claim storage returned an invalid response.",
+        )
+
+    try:
+        return AnalysisDetail.model_validate(result)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Manual claim storage returned invalid analysis records.",
         ) from None
 
 

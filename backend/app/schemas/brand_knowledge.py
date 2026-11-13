@@ -90,6 +90,7 @@ class BrandRuleCreate(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     rule_text: str = Field(min_length=1, max_length=10000)
+    tone_examples: str = Field(default="", max_length=5000)
     channel: str | None = Field(default=None, max_length=80)
 
     check_type: BrandRuleCheckType = BrandRuleCheckType.MANUAL_REVIEW
@@ -103,6 +104,11 @@ class BrandRuleCreate(BaseModel):
             raise ValueError("This field cannot be empty.")
         return value
 
+    @field_validator("tone_examples")
+    @classmethod
+    def normalize_tone_examples(cls, value: str) -> str:
+        return value.strip()
+
     @field_validator("description", "channel", "check_value")
     @classmethod
     def normalize_optional_text(cls, value):
@@ -112,6 +118,8 @@ class BrandRuleCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_check_configuration(self):
+        if self.rule_kind == BrandRuleKind.BRAND_VOICE and not self.tone_examples.strip():
+            raise ValueError("Brand voice rules must include at least one tone example.")
         validate_brand_rule_configuration(
             self.rule_kind,
             self.check_type,
@@ -127,6 +135,7 @@ class BrandRuleUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     rule_text: str | None = Field(default=None, min_length=1, max_length=10000)
+    tone_examples: str | None = Field(default=None, max_length=5000)
     channel: str | None = Field(default=None, max_length=80)
     state: BrandRuleState | None = None
 
@@ -143,7 +152,7 @@ class BrandRuleUpdate(BaseModel):
             raise ValueError("This field cannot be empty.")
         return value
 
-    @field_validator("description", "channel", "check_value")
+    @field_validator("description", "tone_examples", "channel", "check_value")
     @classmethod
     def normalize_optional_text(cls, value):
         if value is None:
@@ -160,6 +169,7 @@ class BrandRuleRecord(BaseModel):
     title: str
     description: str | None = None
     rule_text: str
+    tone_examples: str = ""
     channel: str | None = None
     state: BrandRuleState
     check_type: BrandRuleCheckType
