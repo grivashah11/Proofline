@@ -1,0 +1,33 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Linting
+.ruff_cache/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

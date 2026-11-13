@@ -1,0 +1,456 @@
+import re
+import unicodedata
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
+
+from app.schemas.claim_extraction import (
+    ClaimAssessment,
+    ExtractedClaim,
+    PassportMatchStatus,
+)
+
+INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
+
+def normalize_text(value: str | None) -> str:
+    if value is None:
+        return ""
+
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = normalized.casefold()
+
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def utf16_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def locate_exact_excerpt(
+    content: str,
+    excerpt: str,
+    search_from: int = 0,
+) -> tuple[int | None, int | None, int]:
+
+    start = content.find(excerpt, search_from)
+
+    if start == -1:
+        start = content.find(excerpt)
+
+    if start == -1:
+        return None, None, search_from
+
+    end = start + len(excerpt)
+
+    return (
+        utf16_length(content[:start]),
+        utf16_length(content[:end]),
+        end,
+    )
+
+
+def parse_date(value) -> date | None:
+    if value is None:
+        return None
+
+    if isinstance(value, date):
+        return value
+
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def decimal_value(value) -> Decimal | None:
+    if value is None:
+        return None
+
+    try:
+        result = Decimal(str(value))
+
+        if not result.is_finite():
+            return None
+
+        return result
+
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def create_assessment(
+    claim: ExtractedClaim,
+    status: PassportMatchStatus,
+    span_verified: bool,
+    start_index: int | None,
+    end_index: int | None,
+    explanation: str,
+    recommended_action: str,
+    passport: dict | None = None,
+    version: dict | None = None,
+) -> ClaimAssessment:
+
+    return ClaimAssessment(
+        candidate=claim,
+        status=status,
+        source_span_verified=span_verified,
+        start_index=start_index,
+        end_index=end_index,
+        passport_id=passport.get("id") if passport else None,
+        passport_code=passport.get("passport_code") if passport else None,
+        passport_version_id=version.get("id") if version else None,
+        passport_version_number=(version.get("version_number") if version else None),
+        approved_wording=(version.get("approved_wording") if version else None),
+        evidence_source_title=(
+            version.get("evidence_source_title") if version else None
+        ),
+        evidence_source_url=(version.get("evidence_source_url") if version else None),
+        evidence_reference=(version.get("evidence_reference") if version else None),
+        evidence_excerpt=(version.get("evidence_excerpt") if version else None),
+        explanation=explanation,
+        recommended_action=recommended_action,
+    )
+
+
+def find_matching_passports(
+    claim: ExtractedClaim,
+    passports: list[dict],
+    versions_by_id: dict[str, dict],
+) -> list[tuple[dict, dict]]:
+
+    matches = []
+
+    for passport in passports:
+        if passport.get("status") not in {
+            "active",
+            "review_due",
+        }:
+            continue
+
+        if normalize_text(passport.get("subject")) != normalize_text(claim.subject):
+            continue
+
+        version_id = passport.get("current_version_id")
+
+        if not version_id:
+            continue
+
+        version = versions_by_id.get(str(version_id))
+
+        if not version or version.get("status") != "active":
+            continue
+
+        if normalize_text(version.get("subject")) != normalize_text(claim.subject):
+            continue
+
+        if normalize_text(version.get("attribute")) != normalize_text(claim.attribute):
+            continue
+
+        matches.append((passport, version))
+
+    return matches
+
+
+def evaluate_passport_claim(
+    claim: ExtractedClaim,
+    passport: dict,
+    version: dict,
+    *,
+    channel: str | None,
+    market: str | None,
+    today: date,
+) -> tuple[PassportMatchStatus, str, str]:
+
+    if claim.claim_kind.value != passport.get("claim_type"):
+        return (
+            PassportMatchStatus.NEEDS_VERIFICATION,
+            "The extracted claim category differs from the Passport category.",
+            "Ask an authorised Brand Owner to verify the claim classification.",
+        )
+
+    review_by = parse_date(version.get("review_by"))
+    valid_from = parse_date(version.get("valid_from"))
+    valid_until = parse_date(version.get("valid_until"))
+
+    if (
+        passport.get("status") == "review_due"
+        or review_by is None
+        or review_by <= today
+        or (valid_until is not None and valid_until < today)
+    ):
+        return (
+            PassportMatchStatus.REVIEW_DUE,
+            "The Passport evidence has reached its review date or is no longer current.",
+            "Ask the Brand Owner to verify and refresh the supporting evidence.",
+        )
+
+    if valid_from is not None and valid_from > today:
+        return (
+            PassportMatchStatus.NEEDS_VERIFICATION,
+            "The Passport version is not yet valid.",
+            "Verify the applicable effective date with the Brand Owner.",
+        )
+
+    expected_channel = normalize_text(version.get("channel_scope"))
+
+    if expected_channel:
+        if not channel:
+            return (
+                PassportMatchStatus.NEEDS_VERIFICATION,
+                "The Passport requires a specific channel, but the draft channel was not supplied.",
+                "Select the intended publication channel.",
+            )
+
+        if normalize_text(channel) != expected_channel:
+            return (
+                PassportMatchStatus.NEEDS_VERIFICATION,
+                "The claim is being checked outside the Passport's approved channel scope.",
+                "Ask the Brand Owner to verify whether the Passport applies to this channel.",
+            )
+
+    expected_market = normalize_text(version.get("market_scope"))
+
+    if expected_market:
+        if not market:
+            return (
+                PassportMatchStatus.NEEDS_VERIFICATION,
+                "The Passport requires a specific market, but no market was supplied.",
+                "Select the intended market for this content.",
+            )
+
+        if normalize_text(market) != expected_market:
+            return (
+                PassportMatchStatus.NEEDS_VERIFICATION,
+                "The claim is outside the Passport's specified market scope.",
+                "Ask the Brand Owner to verify the correct market-specific evidence.",
+            )
+
+    conflicts: list[str] = []
+    uncertainties: list[str] = []
+
+    expected_numeric = decimal_value(version.get("numeric_value"))
+    actual_numeric = decimal_value(claim.numeric_value)
+
+    expected_text = version.get("permitted_value")
+
+    if expected_numeric is not None:
+        if actual_numeric is None:
+            uncertainties.append("The numerical value could not be reliably extracted.")
+
+        elif actual_numeric != expected_numeric:
+            conflicts.append(
+                f"Expected numeric value {expected_numeric}, "
+                f"but the draft states {actual_numeric}."
+            )
+
+    elif expected_text is not None:
+        actual_text = claim.value_text or claim.numeric_value
+
+        if actual_text is None:
+            uncertainties.append(
+                "The approved value could not be compared with the draft."
+            )
+
+        elif normalize_text(actual_text) != normalize_text(expected_text):
+            conflicts.append(
+                f"Expected approved value '{expected_text}', "
+                f"but the draft states '{actual_text}'."
+            )
+
+    else:
+        uncertainties.append(
+            "The Passport does not contain a comparable approved value."
+        )
+
+    expected_unit = normalize_text(version.get("unit"))
+    actual_unit = normalize_text(claim.unit)
+
+    if expected_unit:
+        if not actual_unit:
+            uncertainties.append("The draft's unit could not be reliably identified.")
+        elif actual_unit != expected_unit:
+            uncertainties.append(
+                "The draft uses a unit that requires human verification. "
+                "Automatic unit conversion is not performed."
+            )
+
+    elif actual_unit:
+        uncertainties.append("The Passport does not specify a unit for comparison.")
+
+    expected_qualifier = normalize_text(version.get("qualifier"))
+    actual_qualifier = normalize_text(claim.qualifier)
+
+    if expected_qualifier:
+        if not actual_qualifier:
+            uncertainties.append(
+                "The approved qualifier could not be identified in the draft."
+            )
+        elif expected_qualifier != actual_qualifier:
+            conflicts.append(
+                "The draft's qualifier differs from the approved qualifier."
+            )
+
+    elif actual_qualifier:
+        uncertainties.append(
+            "The draft includes a qualifier that the Passport does not specify."
+        )
+
+    required_conditions = normalize_text(version.get("required_conditions"))
+
+    actual_conditions = normalize_text(claim.conditions)
+
+    if required_conditions:
+        if not actual_conditions:
+            uncertainties.append("Required claim conditions could not be identified.")
+        elif required_conditions not in actual_conditions:
+            uncertainties.append(
+                "The draft's extracted conditions do not establish all "
+                "required Passport conditions."
+            )
+
+    if conflicts:
+        return (
+            PassportMatchStatus.CONFLICT,
+            " ".join(conflicts),
+            (
+                "Review the conflicting claim fields and revise the draft "
+                "using the approved wording."
+            ),
+        )
+
+    if uncertainties:
+        return (
+            PassportMatchStatus.NEEDS_VERIFICATION,
+            " ".join(uncertainties),
+            "Send the claim to an authorised reviewer for evidence verification.",
+        )
+
+    return (
+        PassportMatchStatus.SUPPORTED,
+        (
+            "The extracted claim fields match the active Passport record. "
+            "This is an application-level comparison, not independent "
+            "verification of the source."
+        ),
+        "Retain the supported wording and submit it for human review.",
+    )
+
+
+def match_claims(
+    *,
+    content: str,
+    claims: list[ExtractedClaim],
+    passports: list[dict],
+    versions: list[dict],
+    channel: str | None,
+    market: str | None,
+) -> list[ClaimAssessment]:
+
+    versions_by_id = {str(version["id"]): version for version in versions}
+
+    today = datetime.now(INDIA_TIMEZONE).date()
+
+    assessments: list[ClaimAssessment] = []
+    search_cursor = 0
+
+    for claim in claims:
+        start_index, end_index, next_cursor = locate_exact_excerpt(
+            content,
+            claim.exact_text,
+            search_cursor,
+        )
+
+        span_verified = start_index is not None
+
+        if span_verified:
+            search_cursor = next_cursor
+
+        matching = find_matching_passports(
+            claim,
+            passports,
+            versions_by_id,
+        )
+
+        if len(matching) == 0:
+            assessments.append(
+                create_assessment(
+                    claim,
+                    PassportMatchStatus.NEEDS_VERIFICATION,
+                    span_verified,
+                    start_index,
+                    end_index,
+                    (
+                        "No active Claim Passport with an exact matching "
+                        "subject and attribute was found."
+                    ),
+                    (
+                        "Ask the Brand Owner to verify the claim and, "
+                        "if appropriate, register an approved Claim Passport."
+                    ),
+                )
+            )
+            continue
+
+        if len(matching) > 1:
+            assessments.append(
+                create_assessment(
+                    claim,
+                    PassportMatchStatus.NEEDS_VERIFICATION,
+                    span_verified,
+                    start_index,
+                    end_index,
+                    (
+                        "Multiple active Claim Passports match this claim. "
+                        "The correct evidence record is ambiguous."
+                    ),
+                    "Ask the Brand Owner to resolve the matching Passport records.",
+                )
+            )
+            continue
+
+        passport, version = matching[0]
+
+        if not span_verified:
+            assessments.append(
+                create_assessment(
+                    claim,
+                    PassportMatchStatus.NEEDS_VERIFICATION,
+                    False,
+                    None,
+                    None,
+                    (
+                        "The AI extraction did not return an exact excerpt "
+                        "that could be located in the submitted draft."
+                    ),
+                    "Manually select the original claim text before review.",
+                    passport,
+                    version,
+                )
+            )
+            continue
+
+        result_status, explanation, action = evaluate_passport_claim(
+            claim,
+            passport,
+            version,
+            channel=channel,
+            market=market,
+            today=today,
+        )
+
+        assessments.append(
+            create_assessment(
+                claim,
+                result_status,
+                True,
+                start_index,
+                end_index,
+                explanation,
+                action,
+                passport,
+                version,
+            )
+        )
+
+    return assessments
