@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -15,6 +16,8 @@ from app.schemas.workspaces import (
     WorkspaceRecord,
     WorkspaceRole,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/workspaces",
@@ -118,7 +121,11 @@ async def create_workspace(
     gateway: SupabaseGatewayDependency,
 ) -> WorkspaceRecord:
 
-    records = await gateway.request(
+    # Do not request INSERT ... RETURNING here. The workspaces SELECT policy
+    # only exposes a workspace to its members, while the AFTER INSERT trigger
+    # creates the creator's Brand Owner membership. A separate SELECT after
+    # the INSERT allows that trigger to complete before the row is read back.
+    await gateway.request(
         "POST",
         "workspaces",
         payload={
@@ -126,13 +133,33 @@ async def create_workspace(
             "slug": data.slug,
             "created_by": str(auth.user.id),
         },
-        prefer="return=representation",
+        prefer="return=minimal",
+    )
+
+    # The database trigger should now have added the creator as Brand Owner.
+    # Read the row back using the same authenticated user's RLS-scoped token.
+    records = await gateway.request(
+        "GET",
+        "workspaces",
+        params={
+            "select": "id,name,slug,created_by,created_at,updated_at",
+            "slug": f"eq.{data.slug}",
+            "created_by": f"eq.{auth.user.id}",
+            "limit": "1",
+        },
     )
 
     if not records:
+        logger.error(
+            "Workspace insert completed but the creator could not read the "
+            "workspace afterwards; check the owner-membership trigger."
+        )
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Workspace creation returned no record.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Workspace creation completed but could not be loaded. "
+                "Please refresh and try again."
+            ),
         )
 
     return WorkspaceRecord.model_validate(records[0])

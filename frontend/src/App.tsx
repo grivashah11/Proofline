@@ -394,7 +394,7 @@ function AuthScreen() {
 }
 
 function WorkspaceGate() {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -457,7 +457,7 @@ function WorkspaceGate() {
   }
 
   if (workspaces.length === 0) {
-    return <WorkspaceOnboarding onCreated={handleWorkspaceCreated} userId={user?.id ?? ''} />
+    return <WorkspaceOnboarding onCreated={handleWorkspaceCreated} onSignOut={signOut} userId={user?.id ?? ''} />
   }
 
   const selected =
@@ -475,9 +475,11 @@ function WorkspaceGate() {
 
 function WorkspaceOnboarding({
   onCreated,
+  onSignOut,
   userId,
 }: {
   onCreated: () => Promise<number>
+  onSignOut: () => Promise<void>
   userId: string
 }) {
   const [name, setName] = useState('')
@@ -487,6 +489,8 @@ function WorkspaceOnboarding({
   const [error, setError] = useState('')
   const [accessMessage, setAccessMessage] = useState('')
   const [copiedId, setCopiedId] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
 
   async function copyAccountId() {
     try {
@@ -494,6 +498,23 @@ function WorkspaceOnboarding({
       setCopiedId(true)
     } catch {
       setAccessMessage('Clipboard access is unavailable. Select and copy your account ID manually.')
+    }
+  }
+
+  async function handleBackToAuth() {
+    setSigningOut(true)
+    setSignOutError('')
+
+    try {
+      await onSignOut()
+    } catch (err) {
+      setSignOutError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to sign out. Please try again.',
+      )
+    } finally {
+      setSigningOut(false)
     }
   }
 
@@ -637,6 +658,27 @@ function WorkspaceOnboarding({
             Creating a new workspace makes you its <strong>Brand Owner</strong>. To join an existing workspace as a Creator, share your account ID below instead.
           </span>
         </div>
+        <button
+          className="button button-secondary onboarding-back-button"
+          type="button"
+          onClick={() => void handleBackToAuth()}
+          disabled={signingOut}
+        >
+          {signingOut ? (
+            <LoaderCircle size={16} className="spin-icon" />
+          ) : (
+            <LogOut size={16} />
+          )}
+          {signingOut
+            ? 'Signing out...'
+            : 'Back to Sign in / Create Account'}
+        </button>
+
+        {signOutError && (
+          <p className="onboarding-signout-error" role="alert">
+            {signOutError}
+          </p>
+        )}
       </motion.section>
       <section className="onboarding-join-card">
         <div>
