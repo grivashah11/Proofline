@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     claim_passports,
     contents,
     health,
+    images,
     reviews,
     rule_checks,
     terminology,
@@ -27,3 +28,4 @@ api_router.include_router(claim_extraction.router)
 api_router.include_router(contents.router)
 api_router.include_router(analyses.router)
 api_router.include_router(reviews.router)
+api_router.include_router(images.router)
