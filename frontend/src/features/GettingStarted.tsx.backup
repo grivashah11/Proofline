@@ -1,0 +1,223 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Check, ChevronRight, Circle, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { apiRequest } from '../lib/api'
+import type { WorkspaceRole } from '../lib/workspaces'
+import './GettingStarted.css'
+
+type BrandRuleSummary = {
+  rule_kind: string
+  state: string
+}
+
+type TermSummary = {
+  is_active: boolean
+}
+
+type PassportSummary = {
+  status: string
+}
+
+type MemberSummary = {
+  role: string
+}
+
+type SubmissionSummary = {
+  status: string
+}
+
+type SetupSnapshot = {
+  brandVoice: boolean | null
+  terminology: boolean | null
+  passport: boolean | null
+  teammate: boolean | null
+  firstReview: boolean | null
+}
+
+type SetupStep = {
+  id: keyof SetupSnapshot
+  title: string
+  description: string
+  to: string
+  action: string
+  done: boolean | null
+}
+
+const initialSnapshot: SetupSnapshot = {
+  brandVoice: null,
+  terminology: null,
+  passport: null,
+  teammate: null,
+  firstReview: null,
+}
+
+export default function GettingStarted({
+  workspaceId,
+  role,
+}: {
+  workspaceId: string
+  role: WorkspaceRole
+}) {
+  const [snapshot, setSnapshot] = useState<SetupSnapshot>(initialSnapshot)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+
+  const load = useCallback(async () => {
+    const base = `/api/v1/workspaces/${workspaceId}`
+    const results = await Promise.allSettled([
+      apiRequest<BrandRuleSummary[]>(`${base}/brand-rules`),
+      apiRequest<TermSummary[]>(`${base}/terminology`),
+      apiRequest<PassportSummary[]>(`${base}/claim-passports`),
+      apiRequest<MemberSummary[]>(`${base}/members`),
+      apiRequest<SubmissionSummary[]>(`${base}/contents`),
+    ] as const)
+
+    const [rules, terms, passports, members, submissions] = results
+
+    setSnapshot({
+      brandVoice:
+        rules.status === 'fulfilled'
+          ? rules.value.some((item) => item.rule_kind === 'brand_voice' && item.state === 'active')
+          : null,
+      terminology:
+        terms.status === 'fulfilled'
+          ? terms.value.some((item) => item.is_active)
+          : null,
+      passport:
+        passports.status === 'fulfilled'
+          ? passports.value.some((item) => item.status === 'active')
+          : null,
+      teammate:
+        members.status === 'fulfilled'
+          ? members.value.some((item) => item.role === (role === 'brand_owner' ? 'creator' : 'brand_owner'))
+          : null,
+      firstReview:
+        submissions.status === 'fulfilled'
+          ? submissions.value.some((item) => ['approved', 'changes_requested', 'rejected'].includes(item.status))
+          : null,
+    })
+
+    setLoadError(results.some((result) => result.status === 'rejected'))
+    setLoading(false)
+  }, [workspaceId, role])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const handleRefresh = useCallback(() => {
+    setLoading(true)
+    setLoadError(false)
+    void load()
+  }, [load])
+
+  const steps = useMemo<SetupStep[]>(() => [
+    {
+      id: 'brandVoice',
+      title: role === 'brand_owner' ? 'Set your brand voice' : 'Understand the brand voice',
+      description: role === 'brand_owner'
+        ? 'Add a tone guideline and a couple of examples your team can refer to.'
+        : 'Read the tone and messaging guidance your Brand Owner has configured.',
+      to: '/brand-rules',
+      action: role === 'brand_owner' ? 'Set up brand rules' : 'View brand rules',
+      done: snapshot.brandVoice,
+    },
+    {
+      id: 'terminology',
+      title: role === 'brand_owner' ? 'Set brand terminology' : 'Learn the approved language',
+      description: 'Define or review preferred, required and restricted words and phrases.',
+      to: '/terminology',
+      action: role === 'brand_owner' ? 'Configure terminology' : 'View terminology',
+      done: snapshot.terminology,
+    },
+    {
+      id: 'passport',
+      title: role === 'brand_owner' ? 'Register an approved claim' : 'Explore approved claims',
+      description: 'Claim Passports connect an approved statement to its evidence, scope and review date.',
+      to: '/claim-passports',
+      action: role === 'brand_owner' ? 'Create a Claim Passport' : 'View Claim Passports',
+      done: snapshot.passport,
+    },
+    {
+      id: 'teammate',
+      title: role === 'brand_owner' ? 'Connect a Creator' : 'Know your review team',
+      description: role === 'brand_owner'
+        ? 'Add a registered Creator so they can submit content for review.'
+        : 'Check who owns the workspace and who can make the final decision.',
+      to: '/team',
+      action: role === 'brand_owner' ? 'Manage team members' : 'View team members',
+      done: snapshot.teammate,
+    },
+    {
+      id: 'firstReview',
+      title: 'Complete your first review cycle',
+      description: 'Submit a draft, inspect the findings and send the exact revision to an authorised reviewer.',
+      to: '/content',
+      action: 'Open content reviews',
+      done: snapshot.firstReview,
+    },
+  ], [role, snapshot])
+
+  const completed = steps.filter((step) => step.done === true).length
+  const progress = Math.round((completed / steps.length) * 100)
+  const nextStep = steps.find((step) => step.done !== true)
+  const allComplete = completed === steps.length
+
+  return (
+    <section className="getting-started-panel" aria-labelledby="getting-started-title">
+      <div className="getting-started-heading">
+        <div className="getting-started-heading-copy">
+          <span className="getting-started-icon"><Sparkles size={17} /></span>
+          <div>
+            <p className="eyebrow">A CLEAR PLACE TO START</p>
+            <h2 id="getting-started-title">{allComplete ? 'Your workspace is ready' : 'Getting started with Proofline'}</h2>
+            <p>{allComplete
+              ? 'You have completed the core setup. You can return to these sections whenever your brand knowledge changes.'
+              : 'Follow these steps to prepare your brand knowledge and complete a first review. Your progress updates from the workspace records.'}</p>
+          </div>
+        </div>
+        <button className="getting-started-refresh" type="button" onClick={handleRefresh} disabled={loading} aria-label="Refresh setup progress">
+          {loading ? <LoaderCircle className="spin-icon" size={16} /> : <RefreshCw size={16} />}
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      <div className="getting-started-progress-row">
+        <div className="getting-started-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label="Workspace setup progress">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+        <strong>{loading ? 'Checking…' : `${completed} of ${steps.length} complete`}</strong>
+      </div>
+
+      {loadError && (
+        <div className="getting-started-load-error" role="status">
+          Some setup details could not be loaded. Refresh to check progress again.
+        </div>
+      )}
+
+      <div className="getting-started-steps">
+        {steps.map((step, index) => {
+          const isNext = step.id === nextStep?.id
+          return (
+            <Link
+              className={`getting-started-step ${step.done === true ? 'is-complete' : ''} ${isNext ? 'is-next' : ''}`}
+              to={step.to}
+              key={step.id}
+            >
+              <span className="getting-started-step-marker" aria-hidden="true">
+                {step.done === true ? <Check size={15} /> : loading || step.done === null ? <Circle size={13} /> : index + 1}
+              </span>
+              <span className="getting-started-step-copy">
+                <strong>{step.title}</strong>
+                <small>{step.description}</small>
+                <span className="getting-started-step-action">{step.action} <ChevronRight size={14} /></span>
+              </span>
+              {isNext && !allComplete && <span className="getting-started-next-label">NEXT</span>}
+              {step.done === true && <span className="getting-started-complete-label">Done</span>}
+            </Link>
+          )
+        })}
+      </div>
+    </section>
+  )
+}

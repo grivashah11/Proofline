@@ -23,6 +23,98 @@ def normalize_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def normalize_subject(value: str | None) -> str:
+    """Normalize a subject while tolerating a trailing parenthesized model year.
+
+    The year is retained separately by ``subject_model_years`` so a 2024 claim
+    cannot be matched to a Passport scoped to the 2025 model.
+    """
+    normalized = normalize_text(value)
+    normalized = re.sub(r"\s*\((?:19|20)\d{2}\)\s*$", "", normalized)
+    return normalized.strip()
+
+
+def subject_model_years(*values: str | None) -> set[str]:
+    years: set[str] = set()
+    for value in values:
+        if value:
+            years.update(re.findall(r"\b(?:19|20)\d{2}\b", value))
+    return years
+
+
+def normalize_condition_text(value: str | None) -> str:
+    """Normalize punctuation and whitespace without dropping condition words."""
+    if value is None:
+        return ""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def required_conditions_are_present(
+    required_conditions: str | None,
+    extracted_conditions: str | None,
+) -> bool:
+    """Require every configured condition clause to be represented in extraction.
+
+    Clauses are copied from the source draft by the extractor. Normalizing
+    punctuation makes sentence separators immaterial, while retaining all
+    words keeps this check conservative: a partial or paraphrased condition
+    does not silently become a pass.
+    """
+    required = (required_conditions or "").strip()
+    extracted = normalize_condition_text(extracted_conditions)
+
+    if not required:
+        return True
+    if not extracted:
+        return False
+
+    clauses = [
+        normalize_condition_text(part)
+        for part in re.split(r"[.;\n]+", required)
+    ]
+    clauses = [clause for clause in clauses if clause]
+    return bool(clauses) and all(clause in extracted for clause in clauses)
+
+
+def scope_is_unrestricted(value: str | None) -> bool:
+    normalized = normalize_text(value)
+    return normalized in {
+        "",
+        "all",
+        "any",
+        "*",
+        "all channels",
+        "any channel",
+        "all markets",
+        "any market",
+    }
+
+
+def normalize_unit(value: str | None) -> str:
+    normalized = normalize_text(value)
+    aliases = {
+        "hour": "hour",
+        "hours": "hour",
+        "hr": "hour",
+        "hrs": "hour",
+        "minute": "minute",
+        "minutes": "minute",
+        "min": "minute",
+        "mins": "minute",
+        "day": "day",
+        "days": "day",
+        "week": "week",
+        "weeks": "week",
+        "month": "month",
+        "months": "month",
+        "year": "year",
+        "years": "year",
+    }
+    return aliases.get(normalized, normalized)
+
+
 def utf16_length(value: str) -> int:
     return len(value.encode("utf-16-le")) // 2
 
@@ -128,7 +220,13 @@ def find_matching_passports(
         }:
             continue
 
-        if normalize_text(passport.get("subject")) != normalize_text(claim.subject):
+        # A model year may be appended by the extractor even when the
+        # Brand Owner omitted it from the subject field. Ignore only a
+        # trailing parenthesized year for identity comparison, and separately
+        # reject an explicit year conflict using the source/product scope.
+        claim_subject = normalize_subject(claim.subject)
+        passport_subject = normalize_subject(passport.get("subject"))
+        if not claim_subject or claim_subject != passport_subject:
             continue
 
         version_id = passport.get("current_version_id")
@@ -141,7 +239,21 @@ def find_matching_passports(
         if not version or version.get("status") != "active":
             continue
 
-        if normalize_text(version.get("subject")) != normalize_text(claim.subject):
+        if normalize_subject(version.get("subject")) != claim_subject:
+            continue
+
+        claim_years = subject_model_years(
+            claim.subject,
+            claim.product_scope,
+            claim.exact_text,
+        )
+        passport_years = subject_model_years(
+            passport.get("subject"),
+            version.get("subject"),
+            version.get("product_scope"),
+            version.get("approved_wording"),
+        )
+        if claim_years and passport_years and not (claim_years & passport_years):
             continue
 
         if normalize_text(version.get("attribute")) != normalize_text(claim.attribute):
@@ -194,7 +306,7 @@ def evaluate_passport_claim(
 
     expected_channel = normalize_text(version.get("channel_scope"))
 
-    if expected_channel:
+    if not scope_is_unrestricted(expected_channel):
         if not channel:
             return (
                 PassportMatchStatus.NEEDS_VERIFICATION,
@@ -211,7 +323,7 @@ def evaluate_passport_claim(
 
     expected_market = normalize_text(version.get("market_scope"))
 
-    if expected_market:
+    if not scope_is_unrestricted(expected_market):
         if not market:
             return (
                 PassportMatchStatus.NEEDS_VERIFICATION,
@@ -231,6 +343,18 @@ def evaluate_passport_claim(
 
     expected_numeric = decimal_value(version.get("numeric_value"))
     actual_numeric = decimal_value(claim.numeric_value)
+
+    # Some structured extractors populate value_text reliably but omit the
+    # dedicated numeric field. A single unambiguous number in value_text is
+    # safe to compare; do not infer from the whole sentence, which may contain
+    # model numbers or dates.
+    if actual_numeric is None and claim.value_text:
+        value_numbers = re.findall(
+            r"(?<![\w.])[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?![\w.])",
+            claim.value_text,
+        )
+        if len(value_numbers) == 1:
+            actual_numeric = decimal_value(value_numbers[0])
 
     expected_text = version.get("permitted_value")
 
@@ -263,8 +387,8 @@ def evaluate_passport_claim(
             "The Passport does not contain a comparable approved value."
         )
 
-    expected_unit = normalize_text(version.get("unit"))
-    actual_unit = normalize_text(claim.unit)
+    expected_unit = normalize_unit(version.get("unit"))
+    actual_unit = normalize_unit(claim.unit)
 
     if expected_unit:
         if not actual_unit:
@@ -296,14 +420,15 @@ def evaluate_passport_claim(
             "The draft includes a qualifier that the Passport does not specify."
         )
 
-    required_conditions = normalize_text(version.get("required_conditions"))
+    required_conditions = version.get("required_conditions")
 
-    actual_conditions = normalize_text(claim.conditions)
-
-    if required_conditions:
-        if not actual_conditions:
+    if required_conditions and not required_conditions_are_present(
+        required_conditions,
+        claim.conditions,
+    ):
+        if not claim.conditions:
             uncertainties.append("Required claim conditions could not be identified.")
-        elif required_conditions not in actual_conditions:
+        else:
             uncertainties.append(
                 "The draft's extracted conditions do not establish all "
                 "required Passport conditions."

@@ -25,7 +25,7 @@ class ExtractedClaim(BaseModel):
     unit: str | None = Field(default=None, max_length=80)
 
     qualifier: str | None = Field(default=None, max_length=500)
-    conditions: str | None = Field(default=None, max_length=1000)
+    conditions: str | None = Field(default=None, max_length=3000)
 
     product_scope: str | None = Field(default=None, max_length=300)
     channel_scope: str | None = Field(default=None, max_length=300)

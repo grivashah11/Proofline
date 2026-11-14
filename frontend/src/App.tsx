@@ -42,6 +42,7 @@ import ContentReviewsPage from './features/ContentReviewsPage'
 import ReviewQueuePage from './features/ReviewQueuePage'
 import TeamPage from './features/TeamPage'
 import ImagesPage from './features/ImagesPage'
+import GettingStarted from './features/GettingStarted'
 import { useAuth } from './lib/auth-context'
 import {
   createWorkspace,
@@ -50,6 +51,7 @@ import {
   roleLabel,
   type WorkspaceListItem,
   type WorkspaceRecord,
+  type WorkspaceRole,
 } from './lib/workspaces'
 import './App.css'
 import './Auth.css'
@@ -790,7 +792,10 @@ function AppLayout({
           </button>
         </div>
 
-        <div className="workspace-select-wrap">
+        <div
+          className="workspace-select-wrap"
+          title={selected.workspace.name}
+        >
           <span className="workspace-avatar">
             {selected.workspace.name.slice(0, 1).toUpperCase()}
           </span>
@@ -913,7 +918,7 @@ function AppLayout({
               <Routes location={location}>
                 <Route
                   path="/"
-                  element={<DashboardPage workspace={selected.workspace} />}
+                  element={<DashboardPage workspace={selected.workspace} role={selected.role} />}
                 />
                 <Route
                   path="/brand-rules"
@@ -968,7 +973,7 @@ function ApiStatus({ state }: { state: ApiState }) {
   )
 }
 
-function DashboardPage({ workspace }: { workspace: WorkspaceRecord }) {
+function DashboardPage({ workspace, role }: { workspace: WorkspaceRecord; role: WorkspaceRole }) {
   const [recentSubmissions, setRecentSubmissions] = useState<ContentRecord[]>([])
   const [recentLoadedForWorkspace, setRecentLoadedForWorkspace] = useState('')
   const recentLoading = recentLoadedForWorkspace !== workspace.id
@@ -1010,6 +1015,8 @@ function DashboardPage({ workspace }: { workspace: WorkspaceRecord }) {
           <ArrowUpRight size={17} />
         </Link>
       </section>
+
+      <GettingStarted workspaceId={workspace.id} role={role} />
 
       <section className="hero-panel">
         <div className="hero-glow hero-glow-one" />
@@ -1057,8 +1064,8 @@ function DashboardPage({ workspace }: { workspace: WorkspaceRecord }) {
 
       <section className="section-heading">
         <div>
-          <p className="eyebrow">THE PROOFLINE WORKFLOW</p>
-          <h2>Everything you need, in three steps.</h2>
+          <p className="eyebrow">EXPLORE PROOFLINE</p>
+          <h2>More ways to manage your brand.</h2>
         </div>
         <span className="section-caption">A clear path from draft to approval</span>
       </section>

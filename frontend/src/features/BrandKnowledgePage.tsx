@@ -429,13 +429,21 @@ export default function BrandKnowledgePage({
   async function saveTerm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setModalError('')
+
+    const preferredReplacement = termDraft.preferred_replacement.trim()
+    if (termDraft.term_type === 'restricted' && !preferredReplacement) {
+      setModalError(
+        'Add a preferred replacement for restricted terms before saving.',
+      )
+      return
+    }
+
     setSaving(true)
 
     const payload = {
       term_type: termDraft.term_type,
       term: termDraft.term.trim(),
-      preferred_replacement:
-        termDraft.preferred_replacement.trim() || null,
+      preferred_replacement: preferredReplacement || null,
       explanation: termDraft.explanation.trim() || null,
       case_sensitive: termDraft.case_sensitive,
       match_whole_word: termDraft.match_whole_word,
@@ -545,6 +553,26 @@ export default function BrandKnowledgePage({
           You have read-only access to this brand knowledge.
         </div>
       )}
+
+      <section className={`bk-first-use-guide ${isRules ? 'bk-first-use-guide--rules' : 'bk-first-use-guide--terms'}`}>
+        <div className="bk-first-use-guide-icon">
+          {isRules ? <BookOpenCheck size={18} /> : <MessageSquareText size={18} />}
+        </div>
+        <div className="bk-first-use-guide-copy">
+          <strong>{isRules ? 'What are brand rules?' : 'How does terminology work?'}</strong>
+          {isRules ? (
+            <>
+              <p>Brand rules describe the standards your content should follow. Add a clear guideline and, for a brand-voice rule, include examples that show the tone you want.</p>
+              <small>Tone examples help a human reviewer understand the intended voice. They are guidance, not an automatic tone score.</small>
+            </>
+          ) : (
+            <>
+              <p><b>Preferred</b> terms are the names your team should use. <b>Required</b> terms must appear where the rule applies. <b>Restricted</b> terms are flagged so a creator can review or replace them.</p>
+              <small>For restricted terms, provide a suggested replacement so Proofline can show a useful next step.</small>
+            </>
+          )}
+        </div>
+      </section>
 
       {pageError && (
         <div className="bk-error-banner" role="alert">
@@ -1079,7 +1107,9 @@ export default function BrandKnowledgePage({
                   </label>
 
                   <label>
-                    Preferred replacement (optional)
+                    {termDraft.term_type === 'restricted'
+                      ? 'Preferred replacement *'
+                      : 'Preferred replacement (optional)'}
                     <input
                       value={termDraft.preferred_replacement}
                       onChange={(event) =>
@@ -1088,8 +1118,13 @@ export default function BrandKnowledgePage({
                           preferred_replacement: event.target.value,
                         })
                       }
-                      placeholder="What should be used instead?"
+                      placeholder={
+                        termDraft.term_type === 'restricted'
+                          ? 'Required: what should be used instead?'
+                          : 'What should be used instead?'
+                      }
                       maxLength={200}
+                      required={termDraft.term_type === 'restricted'}
                     />
                   </label>
 

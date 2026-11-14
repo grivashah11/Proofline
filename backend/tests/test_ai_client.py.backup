@@ -1,0 +1,110 @@
+import pytest
+from fastapi import HTTPException
+
+from app.services.ai.openai_client import (
+    CLAIM_OUTPUT_SCHEMA,
+    SYSTEM_INSTRUCTIONS,
+    extract_output_text,
+)
+
+
+def test_extract_output_text_success():
+    response = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": '{"claims":[]}',
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert extract_output_text(response) == '{"claims":[]}'
+
+
+def test_extract_output_text_rejects_incomplete_response():
+    response = {
+        "status": "incomplete",
+        "output": [],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        extract_output_text(response)
+
+    assert error.value.status_code == 502
+
+
+def test_extract_output_text_handles_refusal():
+    response = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "refusal",
+                        "refusal": "Request declined.",
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        extract_output_text(response)
+
+    assert error.value.status_code == 422
+
+
+def test_extract_output_text_rejects_empty_response():
+    response = {
+        "status": "completed",
+        "output": [],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        extract_output_text(response)
+
+    assert error.value.status_code == 502
+
+
+def test_extract_output_text_ignores_non_message_items():
+    response = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+            },
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": '{"claims":[]}',
+                    }
+                ],
+            },
+        ],
+    }
+
+    assert extract_output_text(response) == '{"claims":[]}'
+
+
+
+def test_extraction_instructions_classify_product_specifications_as_factual():
+    assert "is factual even when used in an ad" in SYSTEM_INSTRUCTIONS
+    assert "same concise subject string for each" in SYSTEM_INSTRUCTIONS
+    assert "Copy condition wording verbatim" in SYSTEM_INSTRUCTIONS
+
+
+def test_conditions_output_supports_full_passport_condition_length():
+    properties = CLAIM_OUTPUT_SCHEMA["properties"]["claims"]["items"]["properties"]
+    assert properties["conditions"]["maxLength"] == 3000

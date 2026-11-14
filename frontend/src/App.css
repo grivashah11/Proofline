@@ -1196,3 +1196,35 @@
   flex-shrink: 0;
   color: #9280ae;
 }
+/* More compact dashboard hero banner */
+.hero-panel {
+  min-height: 240px;
+  padding: 24px 36px;
+}
+
+.hero-content h2 {
+  margin: 13px 0 8px;
+  font-size: clamp(27px, 2.8vw, 35px);
+  line-height: 1.15;
+}
+
+.hero-content > p {
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.hero-actions {
+  margin-top: 16px;
+}
+
+/* Preserve the mobile layout */
+@media (max-width: 600px) {
+  .hero-panel {
+    min-height: auto;
+    padding: 27px 22px 29px;
+  }
+
+  .hero-content h2 {
+    font-size: 33px;
+  }
+}

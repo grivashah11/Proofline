@@ -9,6 +9,8 @@ import {
   Clock3,
   FilePlus2,
   FileText,
+  ExternalLink,
+  Info,
   LoaderCircle,
   MessageSquareText,
   RefreshCw,
@@ -35,6 +37,8 @@ import {
   outcomeLabel,
   submitForReview,
   type AnalysisDetail,
+  type AnalysisFinding,
+  type ExtractedClaim,
   type ManualClaimInput,
   type ContentComment,
   type ContentDetail,
@@ -79,6 +83,101 @@ function contentTypeLabel(value: ContentType) {
     social_post: 'Social post', advertisement: 'Advertisement', email: 'Email', document: 'Document', other: 'Other',
   }
   return labels[value]
+}
+
+function findingSourceLabel(source: AnalysisFinding['source']) {
+  if (source === 'claim_passport') return 'Claim Passport comparison'
+  if (source === 'ai_claim') return 'AI-extracted claim'
+  if (source === 'terminology') return 'Terminology rule'
+  return 'Brand guideline'
+}
+
+function FindingCard({ finding }: { finding: AnalysisFinding }) {
+  const candidate = finding.candidate_claim && typeof finding.candidate_claim === 'object'
+    ? finding.candidate_claim as Partial<ExtractedClaim>
+    : null
+  const isClaimFinding = finding.source === 'claim_passport' || finding.source === 'ai_claim'
+  const hasEvidence = Boolean(finding.evidence_source_title || finding.evidence_excerpt || finding.evidence_source_url || finding.evidence_reference)
+  const excerpt = finding.matched_text || candidate?.exact_text || null
+
+  return (
+    <article className={`finding-card finding-${finding.outcome}`}>
+      <div className="finding-card-top">
+        <div className="finding-title-wrap">
+          <span className={`finding-severity severity-${finding.severity}`}>{finding.severity}</span>
+          <strong>{finding.title}</strong>
+        </div>
+        <span className={`outcome-pill outcome-${finding.outcome}`}>{outcomeLabel(finding.outcome)}</span>
+      </div>
+
+      <div className="finding-source-label"><Info size={12} /> Checked against: {findingSourceLabel(finding.source)}</div>
+
+      <div className="finding-explanation-block">
+        <span>What Proofline found</span>
+        <p>{finding.message}</p>
+        {excerpt && <blockquote className="finding-excerpt">“{excerpt}”</blockquote>}
+      </div>
+
+      {candidate && (candidate.subject || candidate.attribute) && (
+        <div className="candidate-claim">
+          <span>Extracted claim details</span>
+          <strong>{[candidate.subject, candidate.attribute].filter(Boolean).join(' · ')}</strong>
+          {(candidate.numeric_value || candidate.value_text || candidate.unit || candidate.qualifier) && (
+            <small>
+              {[candidate.qualifier, candidate.numeric_value || candidate.value_text, candidate.unit].filter(Boolean).join(' ')}
+            </small>
+          )}
+        </div>
+      )}
+
+      {finding.approved_wording && (
+        <div className="approved-wording">
+          <span>Approved wording in the Passport</span>
+          <p>{finding.approved_wording}</p>
+        </div>
+      )}
+
+      {finding.passport_version_number && (
+        <div className="finding-passport-reference">
+          <BadgeCheck size={14} />
+          Matched evidence record · Passport version {finding.passport_version_number}
+        </div>
+      )}
+
+      <div className="finding-evidence-explainer">
+        <span>What evidence was used?</span>
+        {hasEvidence ? (
+          <div className="evidence-box">
+            <div className="evidence-box-heading">
+              <BadgeCheck size={15} />
+              <strong>{finding.evidence_source_title || 'Claim Passport evidence'}</strong>
+            </div>
+            {finding.evidence_excerpt && <p>“{finding.evidence_excerpt}”</p>}
+            {finding.evidence_reference && <small>Reference: {finding.evidence_reference}</small>}
+            {finding.evidence_source_url && (
+              <a href={finding.evidence_source_url} target="_blank" rel="noreferrer">
+                Open evidence source <ExternalLink size={13} />
+              </a>
+            )}
+          </div>
+        ) : isClaimFinding ? (
+          <div className="finding-no-evidence">
+            No active Claim Passport evidence was matched to this claim. This means the claim needs human verification; it does not by itself mean the claim is false.
+            {finding.passport_id && <small>Passport record: {finding.passport_id.slice(0, 8)}</small>}
+          </div>
+        ) : (
+          <div className="finding-rule-source">
+            This finding comes from the configured {findingSourceLabel(finding.source).toLowerCase()} in this workspace. No external evidence source was attached to this rule finding.
+          </div>
+        )}
+      </div>
+
+      <div className="finding-action">
+        <span>What should happen next?</span>
+        <p>{finding.recommended_action}</p>
+      </div>
+    </article>
+  )
 }
 
 export default function ContentReviewsPage({ workspaceId, role }: Props) {
@@ -355,6 +454,11 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
             <div><p className="eyebrow">NEW CONTENT</p><h2>Create a submission</h2></div>
             <span className="workflow-step-pill">STEP 01 · DRAFT</span>
           </div>
+          <div className="content-create-guide">
+            <div><span>1</span><p><strong>Save a draft</strong><small>Paste the content and choose its channel and market.</small></p></div>
+            <div><span>2</span><p><strong>Run checks</strong><small>Proofline compares claims and language with approved brand knowledge.</small></p></div>
+            <div><span>3</span><p><strong>Send for review</strong><small>An authorised reviewer makes the final decision on this revision.</small></p></div>
+          </div>
           <div className="workflow-form-grid">
             <label className="workflow-field"><span>Submission title</span><input value={newDraft.title} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, title: event.target.value }))} placeholder="e.g. Hydro Flask summer campaign" maxLength={200} required /></label>
             <label className="workflow-field"><span>Content type</span><select value={newDraft.content_type} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, content_type: event.target.value as ContentType }))}><option value="social_post">Social post</option><option value="advertisement">Advertisement</option><option value="email">Email</option><option value="document">Document</option><option value="other">Other</option></select></label>
@@ -420,20 +524,14 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
                     </div>
                     {analysis.analysis.ai_extraction_status === 'unavailable' && <div className="workflow-notice workflow-notice--warning"><CircleAlert size={16} />AI claim extraction was unavailable for this run. Deterministic brand checks are still shown; do not treat the absence of extracted claims as proof that all claims are supported.</div>}
                     {canEdit && <ManualClaimPanel workspaceId={workspaceId} contentId={detail.content.id} analysisId={analysis.analysis.id} onAdded={(updated) => { setAnalysis(updated); setSuccess('The missed claim was added and marked for verification.'); }} />}
-                    {analysis.findings.length === 0 ? <div className="workflow-inline-empty"><CheckCircle2 size={18} /><div><strong>No findings were returned</strong><p>This run did not identify any configured issues. Human review is still required.</p></div></div> : (
+                    <div className="finding-reading-guide">
+                      <strong>How to read these results</strong>
+                      <p><b>Supported</b> means the extracted fields match an active Passport. <b>Conflict</b> means a compared value or rule differs. <b>Needs verification</b> means evidence or a required detail could not be matched. <b>Needs review</b> means a person should assess the guidance. None of these findings replaces human approval.</p>
+                    </div>
+                    {analysis.findings.length === 0 ? <div className="workflow-inline-empty"><CheckCircle2 size={18} /><div><strong>No findings were returned</strong><p>This run did not identify any configured issues. This is not proof that every claim is true or approved. An authorised reviewer must still inspect the draft.</p></div></div> : (
                       <div className="finding-list">
                         {analysis.findings.map((finding) => (
-                          <article className={`finding-card finding-${finding.outcome}`} key={finding.id}>
-                            <div className="finding-card-top"><div className="finding-title-wrap"><span className={`finding-severity severity-${finding.severity}`}>{finding.severity}</span><strong>{finding.title}</strong></div><span className={`outcome-pill outcome-${finding.outcome}`}>{outcomeLabel(finding.outcome)}</span></div>
-                            <p className="finding-message">{finding.message}</p>
-                            {finding.matched_text && <blockquote className="finding-excerpt">“{finding.matched_text}”</blockquote>}
-                            {finding.candidate_claim && typeof finding.candidate_claim === 'object' && 'subject' in finding.candidate_claim && (
-                              <div className="candidate-claim"><span>Extracted claim</span><strong>{String(finding.candidate_claim.subject)} · {String(finding.candidate_claim.attribute)}</strong><small>{String(finding.candidate_claim.exact_text ?? '')}</small></div>
-                            )}
-                            {finding.approved_wording && <div className="approved-wording"><span>Passport approved wording</span><p>{finding.approved_wording}</p></div>}
-                            {(finding.evidence_source_title || finding.evidence_excerpt) && <div className="evidence-box"><div className="evidence-box-heading"><BadgeCheck size={15} /><strong>{finding.evidence_source_title || 'Claim Passport evidence'}</strong></div>{finding.evidence_excerpt && <p>“{finding.evidence_excerpt}”</p>}{finding.evidence_reference && <small>Reference: {finding.evidence_reference}</small>}{finding.evidence_source_url && <a href={finding.evidence_source_url} target="_blank" rel="noreferrer">Open evidence source <ArrowRight size={13} /></a>}</div>}
-                            <div className="finding-action"><span>Recommended next step</span><p>{finding.recommended_action}</p></div>
-                          </article>
+                          <FindingCard finding={finding} key={finding.id} />
                         ))}
                       </div>
                     )}

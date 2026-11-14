@@ -1,8 +1,10 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.config import Settings, get_settings
@@ -17,11 +19,23 @@ from app.schemas.analysis import (
     AnalysisRunRecord,
     AnalysisRunState,
 )
+from app.schemas.claim_extraction import AIClaimExtraction, ExtractedClaim
 from app.services.ai.openai_client import extract_claims
 from app.services.analysis_service import build_analysis_findings
 from app.schemas.manual_claims import ManualClaimCreate
 from app.services.claim_matcher import locate_exact_excerpt, match_claims, normalize_text
 from app.services.rule_engine import run_rule_engine
+
+logger = logging.getLogger(__name__)
+
+# Increment this whenever the AI extraction instructions or output schema change.
+# The tag makes persisted extraction caches safe across application releases.
+AI_EXTRACTION_CACHE_VERSION = "claims-v1"
+
+
+def _analysis_model_key(requested_model: str) -> str:
+    return f"{requested_model}#proofline-{AI_EXTRACTION_CACHE_VERSION}"
+
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/contents/{content_id}/analyses",
@@ -241,6 +255,115 @@ async def load_analysis_knowledge(
     return terms, rules, passports, versions
 
 
+async def load_cached_ai_extraction(
+    *,
+    workspace_id: UUID,
+    content_id: UUID,
+    revision_id: UUID,
+    draft: str,
+    model_key: str,
+    gateway: SupabaseGateway,
+) -> AIClaimExtraction | None:
+    """Reuse a validated AI extraction for the same immutable draft revision.
+
+    Successful analysis findings already persist each candidate claim. Reuse
+    only completed runs for the same revision and extraction profile; claim
+    matching and deterministic rules are recalculated on every run.
+    """
+    cached_runs = await gateway.request(
+        "GET",
+        "analysis_runs",
+        params={
+            "select": "id,model,ai_extraction_status",
+            "workspace_id": f"eq.{workspace_id}",
+            "content_id": f"eq.{content_id}",
+            "revision_id": f"eq.{revision_id}",
+            "model": f"eq.{model_key}",
+            "ai_extraction_status": "eq.completed",
+            "order": "created_at.desc",
+            "limit": "1",
+        },
+    )
+
+    if not cached_runs:
+        return None
+
+    cached_run_id = cached_runs[0].get("id")
+    if not cached_run_id:
+        return None
+
+    cached_findings = await gateway.request(
+        "GET",
+        "analysis_findings",
+        params={
+            "select": "source,candidate_claim",
+            "workspace_id": f"eq.{workspace_id}",
+            "analysis_run_id": f"eq.{cached_run_id}",
+            "order": "finding_number.asc",
+            "limit": "1500",
+        },
+    )
+
+    claims: list[ExtractedClaim] = []
+
+    for finding in cached_findings:
+        if finding.get("source") not in {"claim_passport", "ai_claim"}:
+            continue
+
+        candidate = finding.get("candidate_claim")
+        if not isinstance(candidate, dict):
+            logger.warning(
+                "Ignoring invalid AI extraction cache because a claim finding "
+                "has no candidate payload workspace_id=%s content_id=%s",
+                workspace_id,
+                content_id,
+            )
+            return None
+
+        extraction_note = candidate.get("extraction_note")
+        if (
+            isinstance(extraction_note, str)
+            and extraction_note.startswith("Manually added by a workspace member")
+        ):
+            # Manual additions belong to a previous analysis run, not to the
+            # cached provider extraction. They are not carried forward.
+            continue
+
+        try:
+            claim = ExtractedClaim.model_validate(candidate)
+        except ValidationError:
+            logger.warning(
+                "Ignoring invalid AI extraction cache because a stored claim "
+                "failed schema validation workspace_id=%s content_id=%s",
+                workspace_id,
+                content_id,
+            )
+            return None
+
+        start_index, end_index, _ = locate_exact_excerpt(draft, claim.exact_text)
+        if start_index is None or end_index is None:
+            logger.warning(
+                "Ignoring stale AI extraction cache because a claim excerpt "
+                "does not match the current revision workspace_id=%s content_id=%s",
+                workspace_id,
+                content_id,
+            )
+            return None
+
+        claims.append(claim)
+
+    try:
+        return AIClaimExtraction(claims=claims)
+    except ValidationError:
+        logger.warning(
+            "Ignoring AI extraction cache because the cached claim collection "
+            "failed validation workspace_id=%s content_id=%s",
+            workspace_id,
+            content_id,
+        )
+        return None
+
+
 @router.post(
     "",
     response_model=AnalysisDetail,
@@ -293,14 +416,72 @@ async def create_content_analysis(
 
     ai_status = AIExtractionState.COMPLETED
     assessments = []
+    analysis_model_key = _analysis_model_key(settings.openai_model)
 
+    extraction = None
     try:
-        extraction = await extract_claims(
-            client=ai_client,
-            settings=settings,
-            content=draft,
+        extraction = await load_cached_ai_extraction(
+            workspace_id=workspace_id,
+            content_id=content_id,
+            revision_id=UUID(str(revision["id"])),
+            draft=draft,
+            model_key=analysis_model_key,
+            gateway=gateway,
+        )
+    except Exception as exc:
+        # Cache is an optimisation, never a dependency. If it cannot be read,
+        # proceed with a fresh provider request.
+        logger.warning(
+            "AI extraction cache lookup failed; requesting fresh extraction "
+            "exception_type=%s workspace_id=%s content_id=%s",
+            type(exc).__name__,
+            workspace_id,
+            content_id,
         )
 
+    if extraction is not None:
+        logger.info(
+            "Reusing persisted AI extraction cache workspace_id=%s content_id=%s "
+            "revision_id=%s claim_count=%s",
+            workspace_id,
+            content_id,
+            revision["id"],
+            len(extraction.claims),
+        )
+    else:
+        try:
+            extraction = await extract_claims(
+                client=ai_client,
+                settings=settings,
+                content=draft,
+            )
+        except HTTPException as exc:
+            ai_status = AIExtractionState.UNAVAILABLE
+            logger.warning(
+                "AI claim extraction unavailable; saving partial analysis "
+                "http_status=%s workspace_id=%s content_id=%s revision_id=%s",
+                exc.status_code,
+                workspace_id,
+                content_id,
+                revision["id"],
+            )
+        except Exception as exc:
+            # Treat unexpected provider/client failures as AI-unavailable so
+            # the user still receives deterministic findings. Log only the
+            # exception type and internal IDs, never draft/provider content.
+            ai_status = AIExtractionState.UNAVAILABLE
+            logger.error(
+                "AI claim extraction raised an unexpected error; saving partial "
+                "analysis exception_type=%s workspace_id=%s content_id=%s revision_id=%s",
+                type(exc).__name__,
+                workspace_id,
+                content_id,
+                revision["id"],
+            )
+
+    if ai_status == AIExtractionState.COMPLETED and extraction is not None:
+        # Claim matching is deliberately outside the provider exception
+        # handlers. Deterministic matching/data-integrity bugs remain visible.
         assessments = match_claims(
             content=draft,
             claims=extraction.claims,
@@ -309,12 +490,6 @@ async def create_content_analysis(
             channel=content.get("channel"),
             market=content.get("market"),
         )
-
-    except HTTPException as exc:
-        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
-            raise
-
-        ai_status = AIExtractionState.UNAVAILABLE
 
     claim_counts = {outcome: 0 for outcome in AnalysisFindingOutcome}
 
@@ -338,7 +513,7 @@ async def create_content_analysis(
             "p_workspace_id": str(workspace_id),
             "p_content_id": str(content_id),
             "p_revision_id": str(revision["id"]),
-            "p_model": settings.openai_model,
+            "p_model": analysis_model_key,
             "p_analysis_status": analysis_status.value,
             "p_ai_extraction_status": ai_status.value,
             "p_content_length": len(draft),

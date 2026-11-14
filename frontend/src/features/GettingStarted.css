@@ -1,0 +1,329 @@
+.getting-started-panel {
+  margin: 18px 0 28px;
+  padding: 20px;
+  border: 1px solid rgba(174, 143, 246, 0.2);
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(122, 75, 193, 0.11), transparent 42%),
+    rgba(21, 16, 32, 0.86);
+}
+
+.getting-started-heading,
+.getting-started-heading-copy,
+.getting-started-refresh,
+.getting-started-progress-row,
+.getting-started-step,
+.getting-started-step-action {
+  display: flex;
+  align-items: center;
+}
+
+.getting-started-heading {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.getting-started-heading-copy {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.getting-started-icon {
+  display: grid;
+  width: 37px;
+  height: 37px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(179, 145, 250, 0.2);
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.13);
+  color: #c6acff;
+}
+
+.getting-started-heading h2 {
+  margin: 5px 0 5px;
+  color: #f3edfc;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.4px;
+}
+
+.getting-started-heading-copy > div > p:last-child {
+  max-width: 720px;
+  margin: 0;
+  color: #a99dbb;
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.getting-started-refresh {
+  min-height: 34px;
+  flex: 0 0 auto;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(190, 160, 232, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #c9bddb;
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.getting-started-refresh:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.getting-started-progress-row {
+  gap: 12px;
+  margin: 17px 0 13px;
+}
+
+.getting-started-progress-track {
+  height: 5px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.getting-started-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8f61e7, #b99aff);
+  transition: width 220ms ease;
+}
+
+.getting-started-progress-row > strong {
+  color: #cbb9ea;
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.getting-started-load-error {
+  margin-bottom: 10px;
+  color: #e4b1a2;
+  font-size: 9px;
+}
+
+.getting-started-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.getting-started-step {
+  position: relative;
+  min-width: 0;
+  min-height: 140px;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 10px;
+  border: 1px solid rgba(190, 160, 232, 0.13);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+  text-decoration: none;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.getting-started-step:hover {
+  transform: translateY(-2px);
+  border-color: rgba(174, 143, 246, 0.35);
+  background: rgba(139, 92, 246, 0.055);
+}
+
+.getting-started-step.is-complete {
+  border-color: rgba(93, 205, 157, 0.16);
+}
+
+.getting-started-step.is-next {
+  border-color: rgba(174, 143, 246, 0.36);
+  background: rgba(139, 92, 246, 0.055);
+}
+
+.getting-started-step-marker {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(179, 145, 250, 0.22);
+  border-radius: 50%;
+  color: #b99aff;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.getting-started-step.is-complete .getting-started-step-marker {
+  border-color: rgba(93, 205, 157, 0.25);
+  background: rgba(93, 205, 157, 0.1);
+  color: #75dcb0;
+}
+
+.getting-started-step-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.getting-started-step-copy > strong {
+  color: #e9e0f4;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.getting-started-step-copy > small {
+  color: #93869f;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.getting-started-step-action {
+  gap: 3px;
+  margin-top: auto;
+  padding-top: 7px;
+  color: #c2a7ff;
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.getting-started-next-label,
+.getting-started-complete-label {
+  position: absolute;
+  top: 9px;
+  right: 8px;
+  color: #b99aff;
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: 0.8px;
+}
+
+.getting-started-complete-label {
+  color: #78d9af;
+}
+
+@media (max-width: 1100px) {
+  .getting-started-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .getting-started-panel {
+    padding: 15px;
+  }
+
+  .getting-started-heading {
+    align-items: flex-start;
+  }
+
+  .getting-started-refresh span {
+    display: none;
+  }
+
+  .getting-started-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .getting-started-step {
+    min-height: 0;
+    padding: 11px;
+  }
+}
+/* Improved onboarding readability */
+.getting-started-heading-copy > div > p:last-child {
+  color: #b8accb;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.getting-started-heading h2 {
+  font-size: 18px;
+}
+
+.getting-started-step-copy > strong {
+  color: #f0eaff;
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.getting-started-step-copy > small {
+  color: #b2a6c4;
+  font-size: 9.5px;
+  line-height: 1.6;
+}
+
+.getting-started-step-action {
+  color: #d0b8ff;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.getting-started-progress-row > strong {
+  font-size: 10px;
+}
+
+.getting-started-next-label,
+.getting-started-complete-label {
+  font-size: 8px;
+}
+/* Better onboarding card interactions */
+.getting-started-step {
+  cursor: pointer;
+  min-height: 148px;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.getting-started-step:hover {
+  transform: translateY(-3px);
+  border-color: rgba(174, 143, 246, 0.55);
+  background: rgba(139, 92, 246, 0.09);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+.getting-started-step:focus-visible {
+  outline: 2px solid #b99aff;
+  outline-offset: 3px;
+}
+
+.getting-started-step:active {
+  transform: translateY(-1px);
+}
+
+.getting-started-refresh:hover:not(:disabled) {
+  border-color: rgba(174, 143, 246, 0.45);
+  background: rgba(139, 92, 246, 0.1);
+}
+/* Fix onboarding status label alignment */
+.getting-started-step {
+  position: relative;
+}
+
+.getting-started-complete-label,
+.getting-started-next-label {
+  position: absolute;
+  top: 14px;
+  right: 12px;
+  z-index: 2;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Prevent headings from colliding with status labels */
+.getting-started-step-copy > strong {
+  display: block;
+  max-width: calc(100% - 42px);
+  line-height: 1.5;
+}

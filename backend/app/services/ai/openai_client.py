@@ -1,9 +1,13 @@
+import logging
+
 import httpx
 from fastapi import HTTPException, status
 from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.schemas.claim_extraction import AIClaimExtraction
+
+logger = logging.getLogger(__name__)
 
 OPENROUTER_RESPONSES_URL = "https://openrouter.ai/api/v1/responses"
 
@@ -31,18 +35,41 @@ EXTRACTION RULES:
 1. Extract factual and promotional claims only.
 2. Ignore greetings, calls to action, ordinary opinions and decorative text.
 3. Every exact_text field must be a verbatim contiguous excerpt
-   from the submitted draft.
-4. Preserve its spelling, capitalization and punctuation.
-5. Identify the subject and attribute of the claim.
-6. Extract numerical values as plain decimal strings.
-7. Extract units, qualifiers and conditions only when present.
-8. Use null when a field cannot be reliably determined.
-9. Do not infer missing units, market scope or product conditions.
-10. Classify each candidate as factual or promotional.
-11. Return an empty claims array when no qualifying claims exist.
-12. Do not provide external research or unsupported verification.
+   containing the claim itself from the submitted draft. Do not append
+   surrounding explanation to exact_text.
+4. Preserve exact_text spelling, capitalization and punctuation.
+5. Identify the specific product/model as the subject. When several claims
+   refer to the same product, use the same concise subject string for each.
+   Do not replace a named product with a generic subject such as "the laptop".
+   A trailing model-year parenthetical may be omitted from subject when the
+   product identity is otherwise clear; never change or invent a model year.
+6. Use a stable, concise attribute label for the same property across claims.
+   For example, describe both "up to 18 hours" and "up to 30 hours" claims
+   about streaming battery life with the same attribute label.
+7. Extract numerical values as plain decimal strings (for example, "18" or
+   "30"), without units, currency symbols or qualifiers.
+8. Extract units and qualifiers separately. Preserve the qualifier meaning;
+   for example, "up to" is not interchangeable with "at least".
+9. Extract conditions only when they are explicitly present in the draft.
+   If an adjacent sentence or nearby sentence in the same paragraph clearly
+   qualifies the claim (such as test method, brightness, connectivity,
+   limitations or a required disclaimer), associate that text with the claim's
+   conditions field even though it is not part of exact_text.
+10. Copy condition wording verbatim from the draft, retaining all material
+    condition clauses. Do not paraphrase, shorten, or infer conditions.
+11. Use null when a field cannot be reliably determined.
+12. Do not infer missing units, market scope or product conditions.
+13. Classify by the nature of the claim, not by the surrounding content type.
+    A measurable or testable product specification (for example, battery life,
+    dimensions, capacity or connectivity) is factual even when used in an ad.
+    Use promotional for subjective positioning, puffery or non-measurable
+    benefit language that is not a concrete specification.
+14. Return an empty claims array when no qualifying claims exist.
+15. Do not provide external research or unsupported verification.
 
-The output must conform exactly to the supplied JSON schema.
+The output must conform exactly to the supplied JSON schema. The AI only
+extracts candidate fields; deterministic application code compares them with
+Claim Passports, and a human reviewer remains responsible for the decision.
 """
 
 
@@ -52,21 +79,35 @@ CLAIM_OUTPUT_SCHEMA = {
     "properties": {
         "claims": {
             "type": "array",
+            "maxItems": 50,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
                     "exact_text": {
                         "type": "string",
+                        "minLength": 1,
+                        "maxLength": 3000,
                         "description": "Exact verbatim claim excerpt from the draft.",
                     },
                     "subject": {
                         "type": "string",
-                        "description": "Product, service, brand, or entity making the claim.",
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "description": (
+                            "Specific product/model identity. Use the same concise "
+                            "subject for claims about the same product; do not use "
+                            "generic labels such as 'the laptop'."
+                        ),
                     },
                     "attribute": {
                         "type": "string",
-                        "description": "Property or attribute being claimed.",
+                        "minLength": 1,
+                        "maxLength": 300,
+                        "description": (
+                            "Stable property label. Use the same attribute wording "
+                            "for comparable numeric claims about the same property."
+                        ),
                     },
                     "claim_kind": {
                         "type": "string",
@@ -74,34 +115,50 @@ CLAIM_OUTPUT_SCHEMA = {
                     },
                     "value_text": {
                         "type": ["string", "null"],
+                        "maxLength": 500,
                         "description": "Claimed value as written, if present.",
                     },
                     "numeric_value": {
                         "type": ["string", "null"],
-                        "description": "Numeric value as a plain decimal string, if present.",
+                        "maxLength": 50,
+                        "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                        "description": (
+                            "Numeric value as a plain decimal string, without units "
+                            "or qualifiers, if present."
+                        ),
                     },
                     "unit": {
                         "type": ["string", "null"],
+                        "maxLength": 80,
                         "description": "Unit explicitly stated in the draft, if present.",
                     },
                     "qualifier": {
                         "type": ["string", "null"],
+                        "maxLength": 500,
                         "description": "Qualifier such as up to, at least, or approximately.",
                     },
                     "conditions": {
                         "type": ["string", "null"],
-                        "description": "Explicit test conditions, limitations, or conditions.",
+                        "maxLength": 3000,
+                        "description": (
+                            "All explicitly stated nearby test conditions, limitations "
+                            "or disclaimers that qualify this claim. Copy verbatim. "
+                            "Maximum 3000 characters."
+                        ),
                     },
                     "product_scope": {
                         "type": ["string", "null"],
+                        "maxLength": 300,
                         "description": "Product or product variant to which the claim applies.",
                     },
                     "channel_scope": {
                         "type": ["string", "null"],
+                        "maxLength": 300,
                         "description": "Channel scope explicitly stated in the claim.",
                     },
                     "market_scope": {
                         "type": ["string", "null"],
+                        "maxLength": 300,
                         "description": "Market scope explicitly stated in the claim.",
                     },
                     "extraction_note": {
@@ -131,8 +188,100 @@ CLAIM_OUTPUT_SCHEMA = {
 }
 
 
+def _log_value(value: object, *, limit: int = 120) -> str | None:
+    """Return a bounded, single-line scalar safe for diagnostic log fields."""
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return None
+
+    normalized = " ".join(str(value).split())
+    return normalized[:limit] or None
+
+
+def _selected_provider(response_data: dict) -> str | None:
+    """Read the selected provider from optional OpenRouter routing metadata."""
+    router_metadata = response_data.get("openrouter_metadata")
+    if not isinstance(router_metadata, dict):
+        return None
+
+    endpoints = router_metadata.get("endpoints")
+    if not isinstance(endpoints, dict):
+        return None
+
+    available = endpoints.get("available")
+    if not isinstance(available, list):
+        return None
+
+    for endpoint in available:
+        if not isinstance(endpoint, dict) or endpoint.get("selected") is not True:
+            continue
+        provider = _log_value(endpoint.get("provider"))
+        if provider:
+            return provider
+
+    return None
+
+
+def _log_provider_diagnostics(
+    response_data: dict,
+    *,
+    http_status: int | None,
+    requested_model: str | None = None,
+) -> None:
+    """Log routing/error identifiers only; never log submitted or generated text."""
+    error = response_data.get("error")
+    if not isinstance(error, dict):
+        error = {}
+
+    error_metadata = error.get("metadata")
+    if not isinstance(error_metadata, dict):
+        error_metadata = {}
+
+    provider = _log_value(error_metadata.get("provider_name"))
+    if provider is None:
+        provider = _selected_provider(response_data)
+
+    incomplete_details = response_data.get("incomplete_details")
+    if not isinstance(incomplete_details, dict):
+        incomplete_details = {}
+
+    usage = response_data.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+
+    output_details = usage.get("output_tokens_details")
+    if not isinstance(output_details, dict):
+        output_details = {}
+
+    logger.warning(
+        "OpenRouter extraction diagnostic http_status=%s requested_model=%s "
+        "selected_model=%s provider=%s response_status=%s incomplete_reason=%s "
+        "output_tokens=%s reasoning_tokens=%s error_code=%s error_type=%s response_id=%s",
+        http_status,
+        _log_value(requested_model),
+        _log_value(response_data.get("model")),
+        provider,
+        _log_value(response_data.get("status")),
+        _log_value(incomplete_details.get("reason")),
+        _log_value(usage.get("output_tokens")),
+        _log_value(output_details.get("reasoning_tokens")),
+        _log_value(error.get("code")),
+        _log_value(response_data.get("error_type")),
+        _log_value(response_data.get("id")),
+    )
+
+
 def extract_output_text(response_data: dict) -> str:
+    if not isinstance(response_data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OpenRouter returned an invalid response structure.",
+        )
+
     if response_data.get("status") != "completed":
+        _log_provider_diagnostics(
+            response_data,
+            http_status=None,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="AI extraction did not complete successfully.",
@@ -166,6 +315,10 @@ def extract_output_text(response_data: dict) -> str:
     output_text = "".join(output_parts)
 
     if not output_text:
+        _log_provider_diagnostics(
+            response_data,
+            http_status=None,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="AI provider returned no structured extraction.",
@@ -174,19 +327,48 @@ def extract_output_text(response_data: dict) -> str:
     return output_text
 
 
-def raise_provider_error(response: httpx.Response) -> None:
+def raise_provider_error(
+    response: httpx.Response,
+    *,
+    requested_model: str | None = None,
+) -> None:
+    response_data = None
+    try:
+        candidate = response.json()
+        if isinstance(candidate, dict):
+            response_data = candidate
+    except (ValueError, TypeError):
+        response_data = None
+
+    if response_data is not None:
+        _log_provider_diagnostics(
+            response_data,
+            http_status=response.status_code,
+            requested_model=requested_model,
+        )
+    else:
+        logger.warning(
+            "OpenRouter extraction diagnostic http_status=%s requested_model=%s "
+            "response_body=unavailable_or_non_json",
+            response.status_code,
+            _log_value(requested_model),
+        )
+
     if response.status_code in (401, 403):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenRouter rejected the API key or its permissions.",
+            detail=(
+                "OpenRouter denied the extraction request. Check API key permissions, "
+                "account limits, or request restrictions."
+            ),
         )
 
     if response.status_code == 402:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "OpenRouter did not allow this request on the current free account. "
-                "Check free-model access and account usage. No paid fallback is enabled."
+                "OpenRouter could not process this request under the current account "
+                "and free-model configuration. No paid fallback is enabled."
             ),
         )
 
@@ -214,6 +396,24 @@ def raise_provider_error(response: httpx.Response) -> None:
     )
 
 
+def _validation_issue_summary(error: ValidationError, *, max_issues: int = 10) -> str:
+    """Summarize Pydantic paths/types without logging model output or draft text."""
+    issues: list[str] = []
+    for item in error.errors(
+        include_input=False,
+        include_context=False,
+        include_url=False,
+    )[:max_issues]:
+        location = item.get("loc", ())
+        path = ".".join(str(part) for part in location)
+        error_type = _log_value(item.get("type"), limit=80) or "validation_error"
+        issues.append(f"{path}:{error_type}" if path else error_type)
+
+    if not issues:
+        return "validation_error"
+    return ";".join(issues)[:600]
+
+
 async def extract_claims(
     client: httpx.AsyncClient,
     settings: Settings,
@@ -230,6 +430,7 @@ async def extract_claims(
         "Content-Type": "application/json",
         "Accept": "application/json",
         "X-OpenRouter-Title": "Proofline",
+        "X-OpenRouter-Metadata": "enabled",
     }
 
     payload = {
@@ -257,7 +458,12 @@ async def extract_claims(
         "provider": {
             "require_parameters": True,
         },
-        "max_output_tokens": 5000,
+        # Keep reasoning enabled at the lowest supported effort. Some free
+        # provider endpoints require reasoning and reject enabled=False; a
+        # minimal effort avoids disabling a mandatory capability while
+        # reducing the chance that reasoning consumes the JSON output budget.
+        "reasoning": {"effort": "minimal"},
+        "max_output_tokens": 8192,
         "store": False,
     }
 
@@ -269,20 +475,33 @@ async def extract_claims(
         )
 
     except httpx.TimeoutException:
+        logger.warning(
+            "OpenRouter extraction timed out requested_model=%s",
+            _log_value(settings.openai_model),
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI extraction timed out. Please retry later.",
         ) from None
 
-    except httpx.RequestError:
+    except httpx.RequestError as exc:
+        logger.warning(
+            "OpenRouter request failed requested_model=%s exception_type=%s",
+            _log_value(settings.openai_model),
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OpenRouter is currently unreachable.",
         ) from None
 
     if response.is_error:
-        raise_provider_error(response)
+        raise_provider_error(
+            response,
+            requested_model=settings.openai_model,
+        )
 
+    response_data = None
     try:
         response_data = response.json()
         output_text = extract_output_text(response_data)
@@ -291,10 +510,56 @@ async def extract_claims(
     except HTTPException:
         raise
 
-    except (ValueError, TypeError, ValidationError):
+    except ValidationError as exc:
+        logger.warning(
+            "OpenRouter extraction response failed application schema validation "
+            "requested_model=%s selected_model=%s response_id=%s "
+            "validation_issues=%s",
+            _log_value(settings.openai_model),
+            _log_value(response_data.get("model"))
+            if isinstance(response_data, dict)
+            else None,
+            _log_value(response_data.get("id"))
+            if isinstance(response_data, dict)
+            else None,
+            _validation_issue_summary(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OpenRouter returned structured claims that failed validation.",
+        ) from None
+
+    except (ValueError, TypeError) as exc:
+        logger.warning(
+            "OpenRouter extraction response could not be parsed "
+            "requested_model=%s selected_model=%s response_id=%s error_type=%s",
+            _log_value(settings.openai_model),
+            _log_value(response_data.get("model"))
+            if isinstance(response_data, dict)
+            else None,
+            _log_value(response_data.get("id"))
+            if isinstance(response_data, dict)
+            else None,
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="OpenRouter returned invalid structured claim data.",
         ) from None
+
+    logger.info(
+        "OpenRouter extraction completed requested_model=%s selected_model=%s "
+        "provider=%s response_id=%s",
+        _log_value(settings.openai_model),
+        _log_value(response_data.get("model"))
+        if isinstance(response_data, dict)
+        else None,
+        _selected_provider(response_data)
+        if isinstance(response_data, dict)
+        else None,
+        _log_value(response_data.get("id"))
+        if isinstance(response_data, dict)
+        else None,
+    )
 
     return extraction

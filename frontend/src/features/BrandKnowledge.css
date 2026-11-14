@@ -988,3 +988,58 @@
     animation: none;
   }
 }
+
+.bk-first-use-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 17px;
+  padding: 14px 15px;
+  border: 1px solid rgba(174, 143, 246, 0.17);
+  border-radius: 11px;
+  background: rgba(139, 92, 246, 0.045);
+}
+
+.bk-first-use-guide-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(179, 145, 250, 0.18);
+  border-radius: 9px;
+  background: rgba(139, 92, 246, 0.1);
+  color: #c2a7ff;
+}
+
+.bk-first-use-guide-copy {
+  min-width: 0;
+}
+
+.bk-first-use-guide-copy > strong {
+  display: block;
+  margin: 1px 0 5px;
+  color: #e9e0f5;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.bk-first-use-guide-copy p {
+  margin: 0;
+  color: #a99dbb;
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.bk-first-use-guide-copy p b {
+  color: #d6c6f0;
+  font-weight: 650;
+}
+
+.bk-first-use-guide-copy small {
+  display: block;
+  margin-top: 5px;
+  color: #887b98;
+  font-size: 8px;
+  line-height: 1.6;
+}

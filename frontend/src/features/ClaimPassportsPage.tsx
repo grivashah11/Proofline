@@ -259,6 +259,7 @@ export default function ClaimPassportsPage({
   const [versionModalOpen, setVersionModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [modalError, setModalError] = useState('')
+  const [versionStep, setVersionStep] = useState<1 | 2 | 3>(1)
 
   const [passportDraft, setPassportDraft] =
     useState<PassportDraft>(initialPassportDraft)
@@ -312,6 +313,8 @@ export default function ClaimPassportsPage({
 
   function openCreatePassport() {
     setPassportDraft(initialPassportDraft())
+    setVersionDraft(initialVersionDraft())
+    setVersionStep(1)
     setModalError('')
     setPassportModalOpen(true)
   }
@@ -323,8 +326,46 @@ export default function ClaimPassportsPage({
       ...initialVersionDraft(),
       subject: selectedPassport.subject,
     })
+    setVersionStep(1)
     setModalError('')
     setVersionModalOpen(true)
+  }
+
+  function handleVersionWizardSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setModalError('')
+
+    if (versionStep === 1) {
+      setVersionStep(2)
+      return
+    }
+
+    if (versionStep === 2) {
+      if (!versionDraft.review_by) {
+        setModalError('Add a review-by date so the evidence can be checked again before it becomes stale.')
+        return
+      }
+      if (
+        versionDraft.valid_from &&
+        versionDraft.valid_until &&
+        versionDraft.valid_until < versionDraft.valid_from
+      ) {
+        setModalError('The valid-until date cannot be earlier than the valid-from date.')
+        return
+      }
+      if (
+        versionDraft.review_by &&
+        versionDraft.valid_until &&
+        versionDraft.review_by > versionDraft.valid_until
+      ) {
+        setModalError('The review-by date should be on or before the valid-until date.')
+        return
+      }
+      setVersionStep(3)
+      return
+    }
+
+    void createVersion(event)
   }
 
   async function createPassport(event: FormEvent<HTMLFormElement>) {
@@ -357,8 +398,14 @@ export default function ClaimPassportsPage({
       )
 
       setPassportModalOpen(false)
+      setVersionDraft({
+        ...initialVersionDraft(),
+        subject: created.subject,
+      })
+      setVersionStep(1)
       setRefreshKey((value) => value + 1)
       await openPassport(created)
+      setVersionModalOpen(true)
     } catch (error) {
       setModalError(errorMessage(error))
     } finally {
@@ -396,6 +443,30 @@ export default function ClaimPassportsPage({
       !/^https?:\/\/.+/i.test(versionDraft.evidence_source_url.trim())
     ) {
       setModalError('Enter a valid HTTP or HTTPS evidence URL.')
+      return
+    }
+
+    if (!versionDraft.evidence_source_title.trim()) {
+      setModalError('Add the title of the source that supports this claim.')
+      setVersionStep(3)
+      return
+    }
+
+    if (!versionDraft.evidence_excerpt.trim()) {
+      setModalError('Paste the exact source excerpt that supports the approved wording.')
+      setVersionStep(3)
+      return
+    }
+
+    if (!versionDraft.evidence_source_url.trim() && !versionDraft.evidence_reference.trim()) {
+      setModalError('Add either a source URL or a document/page reference so the evidence can be inspected.')
+      setVersionStep(3)
+      return
+    }
+
+    if (!versionDraft.review_by) {
+      setModalError('Add a review-by date before saving this evidence version.')
+      setVersionStep(2)
       return
     }
 
@@ -530,6 +601,11 @@ export default function ClaimPassportsPage({
           You have read-only access to Claim Passports in this workspace.
         </div>
       )}
+
+      <div className="cp-concept-note">
+        <div><BadgeCheck size={17} /></div>
+        <p><strong>Think of a Claim Passport as the identity of an approved claim.</strong> Each version stores the exact wording, permitted scope, conditions and evidence that applied at that time. Save a version as a draft first; an authorised Brand Owner must verify and activate it before it can support automated matching.</p>
+      </div>
 
       {pageError && (
         <div className="cp-error-banner" role="alert">
@@ -763,6 +839,11 @@ export default function ClaimPassportsPage({
                 <h3>Passport versions</h3>
               </div>
               <span className="cp-total-pill">{versions.length} versions</span>
+            </div>
+
+            <div className="cp-version-explainer">
+              <History size={17} />
+              <p><strong>Why keep versions?</strong> Create a new version when approved wording, evidence, conditions or scope changes. Older versions stay available so earlier content reviews remain traceable to the evidence used at that time.</p>
             </div>
 
             {versionsLoading ? (
@@ -1077,6 +1158,10 @@ export default function ClaimPassportsPage({
                   </div>
                 )}
 
+                <div className="cp-wizard-callout">
+                  <Sparkles size={16} />
+                  <p>After this short identity step, Proofline will guide you through the approved wording and supporting evidence for the first version. The Passport stays in Draft until an authorised Brand Owner verifies and activates that version.</p>
+                </div>
                 <div className="cp-modal-actions">
                   <button
                     className="cp-button cp-button-secondary"
@@ -1095,7 +1180,7 @@ export default function ClaimPassportsPage({
                     ) : (
                       <Check size={16} />
                     )}
-                    {saving ? 'Creating...' : 'Create Passport'}
+                    {saving ? 'Creating...' : 'Continue to approved claim'}
                   </button>
                 </div>
               </form>
@@ -1129,10 +1214,9 @@ export default function ClaimPassportsPage({
                   <p className="cp-eyebrow">
                     {selectedPassport.passport_code}
                   </p>
-                  <h2 id="cp-version-modal-title">Add a Passport version</h2>
+                  <h2 id="cp-version-modal-title">{versions.length === 0 ? 'Set up the first version' : 'Add a Passport version'}</h2>
                   <p>
-                    Define the approved wording and link the source that
-                    supports this claim.
+                    Follow three short steps to define the approved claim, its scope and the evidence that supports it.
                   </p>
                 </div>
                 <button
@@ -1145,367 +1229,207 @@ export default function ClaimPassportsPage({
                 </button>
               </div>
 
-              <form className="cp-form" onSubmit={createVersion}>
-                <div className="cp-form-section-heading">
-                  <span>01</span>
-                  <div>
-                    <strong>Approved claim</strong>
-                    <small>Define exactly what the brand is allowed to say.</small>
-                  </div>
+              <form className="cp-form cp-wizard-form" onSubmit={handleVersionWizardSubmit}>
+                <div className="cp-wizard-progress" aria-label={`Step ${versionStep} of 3`}>
+                  {[1, 2, 3].map((step) => (
+                    <div className={`cp-wizard-progress-step ${versionStep >= step ? 'is-active' : ''}`} key={step}>
+                      <span>{versionStep > step ? <Check size={13} /> : step}</span>
+                      <small>{step === 1 ? 'Approved claim' : step === 2 ? 'Scope & dates' : 'Evidence'}</small>
+                    </div>
+                  ))}
                 </div>
 
-                <label>
-                  Approved wording *
-                  <textarea
-                    rows={3}
-                    value={versionDraft.approved_wording}
-                    onChange={(event) =>
-                      setVersionDraft({
-                        ...versionDraft,
-                        approved_wording: event.target.value,
-                      })
-                    }
-                    placeholder="Write the exact claim that may be used in content..."
-                    maxLength={3000}
-                    required
-                  />
-                </label>
+                {versionStep === 1 && (
+                  <>
+                    <div className="cp-wizard-step-intro">
+                      <p className="cp-eyebrow">STEP 1 OF 3</p>
+                      <h3>What exactly is the brand allowed to claim?</h3>
+                      <p>Write the approved statement and the structured fields Proofline will compare with future drafts. Use consistent subject and attribute wording so the right evidence record can be found.</p>
+                    </div>
 
-                <div className="cp-form-grid">
-                  <label>
-                    Subject *
-                    <input
-                      value={versionDraft.subject}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          subject: event.target.value,
-                        })
-                      }
-                      maxLength={300}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Attribute *
-                    <input
-                      value={versionDraft.attribute}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          attribute: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. insulation duration"
-                      maxLength={300}
-                      required
-                    />
-                  </label>
-                </div>
+                    <label>
+                      Approved wording *
+                      <textarea
+                        rows={3}
+                        value={versionDraft.approved_wording}
+                        onChange={(event) => setVersionDraft({ ...versionDraft, approved_wording: event.target.value })}
+                        placeholder="e.g. The bottle keeps drinks cold for up to 24 hours."
+                        maxLength={3000}
+                        required
+                      />
+                      <small>This is the authorised wording. It is not automatically inserted into creator drafts.</small>
+                    </label>
 
-                <div className="cp-form-grid">
-                  <label>
-                    Permitted value
-                    <input
-                      value={versionDraft.permitted_value}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          permitted_value: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. up to 24 hours"
-                      maxLength={500}
-                    />
-                  </label>
-                  <label>
-                    Numeric value
-                    <input
-                      value={versionDraft.numeric_value}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          numeric_value: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. 24"
-                    />
-                  </label>
-                </div>
+                    <div className="cp-form-grid">
+                      <label>
+                        Passport subject
+                        <input value={selectedPassport.subject} readOnly />
+                        <small>This stays aligned with the Passport identity. Create a separate Passport for a different product or model.</small>
+                      </label>
+                      <label>
+                        Attribute *
+                        <input
+                          value={versionDraft.attribute}
+                          onChange={(event) => setVersionDraft({ ...versionDraft, attribute: event.target.value })}
+                          placeholder="e.g. cold retention duration"
+                          maxLength={300}
+                          required
+                        />
+                        <small>Name the specific feature being claimed.</small>
+                      </label>
+                    </div>
 
-                <div className="cp-form-grid">
-                  <label>
-                    Unit
-                    <input
-                      value={versionDraft.unit}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          unit: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. hours"
-                      maxLength={80}
-                    />
-                  </label>
-                  <label>
-                    Qualifier
-                    <input
-                      value={versionDraft.qualifier}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          qualifier: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. under controlled conditions"
-                      maxLength={500}
-                    />
-                  </label>
-                </div>
+                    <div className="cp-form-grid cp-form-grid-three">
+                      <label>
+                        Permitted value
+                        <input value={versionDraft.permitted_value} onChange={(event) => setVersionDraft({ ...versionDraft, permitted_value: event.target.value })} placeholder="e.g. up to 24" maxLength={500} />
+                      </label>
+                      <label>
+                        Numeric value
+                        <input value={versionDraft.numeric_value} onChange={(event) => setVersionDraft({ ...versionDraft, numeric_value: event.target.value })} placeholder="e.g. 24" />
+                      </label>
+                      <label>
+                        Unit
+                        <input value={versionDraft.unit} onChange={(event) => setVersionDraft({ ...versionDraft, unit: event.target.value })} placeholder="e.g. hours" maxLength={80} />
+                      </label>
+                    </div>
 
-                <label>
-                  Required conditions
-                  <textarea
-                    rows={2}
-                    value={versionDraft.required_conditions}
-                    onChange={(event) =>
-                      setVersionDraft({
-                        ...versionDraft,
-                        required_conditions: event.target.value,
-                      })
-                    }
-                    placeholder="Conditions that must accompany this claim..."
-                    maxLength={3000}
-                  />
-                </label>
+                    <div className="cp-form-grid">
+                      <label>
+                        Qualifier
+                        <input value={versionDraft.qualifier} onChange={(event) => setVersionDraft({ ...versionDraft, qualifier: event.target.value })} placeholder="e.g. up to" maxLength={500} />
+                      </label>
+                      <label>
+                        Required conditions
+                        <textarea rows={2} value={versionDraft.required_conditions} onChange={(event) => setVersionDraft({ ...versionDraft, required_conditions: event.target.value })} placeholder="e.g. 1080p video streamed over Wi-Fi under the source's stated test conditions" maxLength={3000} />
+                      </label>
+                    </div>
+                    <div className="cp-wizard-callout">
+                      <ShieldCheck size={16} />
+                      <p>Proofline compares the extracted subject, attribute, value, unit and qualifier with this record. Keep the wording specific and avoid combining unrelated product models in one Passport.</p>
+                    </div>
+                  </>
+                )}
 
-                <div className="cp-form-section-heading">
-                  <span>02</span>
-                  <div>
-                    <strong>Where this claim applies</strong>
-                    <small>Set the product, channel and market scope.</small>
-                  </div>
-                </div>
+                {versionStep === 2 && (
+                  <>
+                    <div className="cp-wizard-step-intro">
+                      <p className="cp-eyebrow">STEP 2 OF 3</p>
+                      <h3>Where and when does this claim apply?</h3>
+                      <p>Set the product, channel and market boundaries. Use “All” when the claim is intended to apply across every channel or market.</p>
+                    </div>
 
-                <div className="cp-form-grid">
-                  <label>
-                    Product scope
-                    <input
-                      value={versionDraft.product_scope}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          product_scope: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. HydraLite 750ml"
-                      maxLength={300}
-                    />
-                  </label>
-                  <label>
-                    Channel scope
-                    <input
-                      value={versionDraft.channel_scope}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          channel_scope: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. Website, Instagram"
-                      maxLength={300}
-                    />
-                  </label>
-                </div>
+                    <div className="cp-form-grid">
+                      <label>
+                        Product scope
+                        <input value={versionDraft.product_scope} onChange={(event) => setVersionDraft({ ...versionDraft, product_scope: event.target.value })} placeholder="e.g. 24 oz Standard Mouth bottle" maxLength={300} />
+                      </label>
+                      <label>
+                        Channel scope
+                        <input value={versionDraft.channel_scope} onChange={(event) => setVersionDraft({ ...versionDraft, channel_scope: event.target.value })} placeholder="All or Website" maxLength={300} />
+                        <small>Enter All for any channel, or the specific channel covered by the evidence.</small>
+                      </label>
+                    </div>
+                    <label>
+                      Market scope
+                      <input value={versionDraft.market_scope} onChange={(event) => setVersionDraft({ ...versionDraft, market_scope: event.target.value })} placeholder="All or India" maxLength={300} />
+                      <small>Use All only when the supporting evidence is applicable in every market.</small>
+                    </label>
 
-                <label>
-                  Market scope
-                  <input
-                    value={versionDraft.market_scope}
-                    onChange={(event) =>
-                      setVersionDraft({
-                        ...versionDraft,
-                        market_scope: event.target.value,
-                      })
-                    }
-                    placeholder="e.g. India"
-                    maxLength={300}
-                  />
-                </label>
+                    <div className="cp-form-section-heading">
+                      <span><CalendarDays size={15} /></span>
+                      <div>
+                        <strong>Validity and review schedule</strong>
+                        <small>Choose when this version applies and when a person should re-check its evidence.</small>
+                      </div>
+                    </div>
+                    <div className="cp-form-grid cp-date-grid">
+                      <label>
+                        Valid from
+                        <input type="date" value={versionDraft.valid_from} onChange={(event) => setVersionDraft({ ...versionDraft, valid_from: event.target.value })} />
+                      </label>
+                      <label>
+                        Valid until
+                        <input type="date" value={versionDraft.valid_until} onChange={(event) => setVersionDraft({ ...versionDraft, valid_until: event.target.value })} />
+                      </label>
+                      <label>
+                        Review by *
+                        <input type="date" value={versionDraft.review_by} onChange={(event) => setVersionDraft({ ...versionDraft, review_by: event.target.value })} required />
+                        <small>Set a future date to remind the owner to re-check the source.</small>
+                      </label>
+                    </div>
+                    <div className="cp-wizard-callout">
+                      <Clock3 size={16} />
+                      <p>A review-by date does not automatically renew evidence. It tells the team when the source should be checked again.</p>
+                    </div>
+                  </>
+                )}
 
-                <div className="cp-form-section-heading">
-                  <span>03</span>
-                  <div>
-                    <strong>Supporting evidence</strong>
-                    <small>
-                      Connect the claim to the document or source that backs it.
-                    </small>
-                  </div>
-                </div>
+                {versionStep === 3 && (
+                  <>
+                    <div className="cp-wizard-step-intro">
+                      <p className="cp-eyebrow">STEP 3 OF 3</p>
+                      <h3>Connect the claim to its source</h3>
+                      <p>Add an inspectable source and paste the exact excerpt that supports the approved wording. A Passport version remains a draft until its evidence is verified and activated.</p>
+                    </div>
 
-                <label>
-                  Evidence source title
-                  <input
-                    value={versionDraft.evidence_source_title}
-                    onChange={(event) =>
-                      setVersionDraft({
-                        ...versionDraft,
-                        evidence_source_title: event.target.value,
-                      })
-                    }
-                    placeholder="e.g. Independent insulation test report"
-                    maxLength={500}
-                  />
-                </label>
-
-                <label>
-                  Evidence source URL
-                  <input
-                    type="url"
-                    value={versionDraft.evidence_source_url}
-                    onChange={(event) =>
-                      setVersionDraft({
-                        ...versionDraft,
-                        evidence_source_url: event.target.value,
-                      })
-                    }
-                    placeholder="https://example.com/evidence"
-                  />
-                </label>
-
-                <label>
-                  Supporting excerpt
-                  <textarea
-                    rows={3}
-                    value={versionDraft.evidence_excerpt}
-                    onChange={(event) =>
-                      setVersionDraft({
-                        ...versionDraft,
-                        evidence_excerpt: event.target.value,
-                      })
-                    }
-                    placeholder="Paste the exact passage that supports the claim..."
-                    maxLength={10000}
-                  />
-                </label>
-
-                <div className="cp-form-grid">
-                  <label>
-                    Evidence reference
-                    <input
-                      value={versionDraft.evidence_reference}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          evidence_reference: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. Page 4, Table 2"
-                      maxLength={1000}
-                    />
-                  </label>
-                  <label>
-                    Source version
-                    <input
-                      value={versionDraft.evidence_source_version}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          evidence_source_version: event.target.value,
-                        })
-                      }
-                      placeholder="e.g. Report v2"
-                      maxLength={200}
-                    />
-                  </label>
-                </div>
-
-                <div className="cp-form-section-heading">
-                  <span>04</span>
-                  <div>
-                    <strong>Validity and review dates</strong>
-                    <small>Optional dates for managing evidence freshness.</small>
-                  </div>
-                </div>
-
-                <div className="cp-form-grid cp-date-grid">
-                  <label>
-                    Valid from
-                    <input
-                      type="date"
-                      value={versionDraft.valid_from}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          valid_from: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Valid until
-                    <input
-                      type="date"
-                      value={versionDraft.valid_until}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          valid_until: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Review by
-                    <input
-                      type="date"
-                      value={versionDraft.review_by}
-                      onChange={(event) =>
-                        setVersionDraft({
-                          ...versionDraft,
-                          review_by: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-
-                <div className="cp-evidence-reminder">
-                  <ShieldCheck size={17} />
-                  <p>
-                    A saved version remains a draft. Proofline will verify
-                    the required evidence and version details when you
-                    choose to activate it.
-                  </p>
-                </div>
+                    <label>
+                      Evidence source title *
+                      <input value={versionDraft.evidence_source_title} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_source_title: event.target.value })} placeholder="e.g. Official product technical specifications" maxLength={500} required />
+                    </label>
+                    <label>
+                      Evidence source URL
+                      <input type="url" value={versionDraft.evidence_source_url} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_source_url: event.target.value })} placeholder="https://example.com/product-specifications" />
+                      <small>Provide a stable link, or add a document reference below if the source is not online.</small>
+                    </label>
+                    <label>
+                      Exact supporting excerpt *
+                      <textarea rows={3} value={versionDraft.evidence_excerpt} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_excerpt: event.target.value })} placeholder="Paste the exact passage, table value or sentence that supports the approved wording..." maxLength={10000} required />
+                      <small>Keep the excerpt faithful to the source. Do not rewrite it as marketing copy.</small>
+                    </label>
+                    <div className="cp-form-grid">
+                      <label>
+                        Evidence reference
+                        <input value={versionDraft.evidence_reference} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_reference: event.target.value })} placeholder="e.g. Battery and Power, Footnote 3" maxLength={1000} />
+                      </label>
+                      <label>
+                        Source version
+                        <input value={versionDraft.evidence_source_version} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_source_version: event.target.value })} placeholder="e.g. Product specifications, 2025" maxLength={200} />
+                      </label>
+                    </div>
+                    <div className="cp-wizard-callout cp-wizard-callout--important">
+                      <ShieldCheck size={16} />
+                      <p>Before saving, make sure the source title and excerpt are present, and provide either a source URL or a page/section reference. The Brand Owner must still verify the evidence before activation.</p>
+                    </div>
+                  </>
+                )}
 
                 {modalError && (
                   <div className="cp-error-banner" role="alert">
                     <AlertCircle size={16} />
-                    {modalError}
+                    <span>{modalError}</span>
                   </div>
                 )}
 
-                <div className="cp-modal-actions">
+                <div className="cp-modal-actions cp-wizard-actions">
                   <button
                     className="cp-button cp-button-secondary"
                     type="button"
-                    onClick={() => setVersionModalOpen(false)}
+                    onClick={() => {
+                      if (versionStep === 1) setVersionModalOpen(false)
+                      else setVersionStep((current) => (current - 1) as 1 | 2 | 3)
+                      setModalError('')
+                    }}
                   >
-                    Cancel
+                    {versionStep === 1 ? 'Cancel' : 'Back'}
                   </button>
                   <button
                     className="cp-button cp-button-primary"
                     type="submit"
                     disabled={saving}
                   >
-                    {saving ? (
-                      <LoaderCircle className="cp-spinner" size={16} />
-                    ) : (
-                      <Check size={16} />
-                    )}
-                    {saving ? 'Saving...' : 'Save draft version'}
+                    {saving ? <LoaderCircle className="cp-spinner" size={16} /> : versionStep === 3 ? <Check size={16} /> : <ChevronRight size={16} />}
+                    {saving ? 'Saving...' : versionStep === 3 ? 'Save draft version' : 'Continue'}
                   </button>
                 </div>
               </form>

@@ -1,0 +1,345 @@
+import asyncio
+import json
+import logging
+
+import httpx
+import pytest
+from fastapi import HTTPException
+from pydantic import SecretStr
+
+from app.core.config import Settings
+from app.services.ai.openai_client import (
+    CLAIM_OUTPUT_SCHEMA,
+    SYSTEM_INSTRUCTIONS,
+    extract_claims,
+    extract_output_text,
+    raise_provider_error,
+)
+
+
+def test_extract_output_text_success():
+    response = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": '{"claims":[]}',
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert extract_output_text(response) == '{"claims":[]}'
+
+
+def test_extract_output_text_rejects_incomplete_response():
+    response = {
+        "status": "incomplete",
+        "output": [],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        extract_output_text(response)
+
+    assert error.value.status_code == 502
+
+
+def test_extract_output_text_handles_refusal():
+    response = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "refusal",
+                        "refusal": "Request declined.",
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        extract_output_text(response)
+
+    assert error.value.status_code == 422
+
+
+def test_extract_output_text_rejects_empty_response():
+    response = {
+        "status": "completed",
+        "output": [],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        extract_output_text(response)
+
+    assert error.value.status_code == 502
+
+
+def test_extract_output_text_ignores_non_message_items():
+    response = {
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+            },
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": '{"claims":[]}',
+                    }
+                ],
+            },
+        ],
+    }
+
+    assert extract_output_text(response) == '{"claims":[]}'
+
+
+def test_extraction_instructions_classify_product_specifications_as_factual():
+    assert "is factual even when used in an ad" in SYSTEM_INSTRUCTIONS
+    assert "same concise subject string for each" in SYSTEM_INSTRUCTIONS
+    assert "Copy condition wording verbatim" in SYSTEM_INSTRUCTIONS
+
+
+def test_conditions_output_supports_full_passport_condition_length():
+    properties = CLAIM_OUTPUT_SCHEMA["properties"]["claims"]["items"]["properties"]
+    assert properties["conditions"]["maxLength"] == 3000
+
+
+def test_raise_provider_error_logs_safe_structured_diagnostics(caplog):
+    response = httpx.Response(
+        502,
+        json={
+            "error": {
+                "code": "provider_error",
+                "message": "A private draft fragment must not appear in logs.",
+                "metadata": {
+                    "provider_name": "ExampleProvider",
+                },
+            },
+            "error_type": "provider_unavailable",
+            "id": "resp_failed_123",
+        },
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(HTTPException) as error:
+            raise_provider_error(response, requested_model="openrouter/free")
+
+    assert error.value.status_code == 503
+    assert "http_status=502" in caplog.text
+    assert "requested_model=openrouter/free" in caplog.text
+    assert "provider=ExampleProvider" in caplog.text
+    assert "error_code=provider_error" in caplog.text
+    assert "error_type=provider_unavailable" in caplog.text
+    assert "resp_failed_123" in caplog.text
+    assert "private draft fragment" not in caplog.text
+
+
+def test_failed_http_200_response_logs_response_error_details(caplog):
+    response = {
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "usage": {
+            "output_tokens": 5193,
+            "output_tokens_details": {"reasoning_tokens": 5000},
+        },
+        "id": "resp_failed_456",
+        "model": "example/free-model",
+        "error": {
+            "code": "provider_error",
+            "message": "Do not log the submitted content.",
+            "metadata": {
+                "provider_name": "ExampleProvider",
+            },
+        },
+        "error_type": "provider_unavailable",
+    }
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(HTTPException) as error:
+            extract_output_text(response)
+
+    assert error.value.status_code == 502
+    assert "selected_model=example/free-model" in caplog.text
+    assert "provider=ExampleProvider" in caplog.text
+    assert "error_type=provider_unavailable" in caplog.text
+    assert "response_status=incomplete" in caplog.text
+    assert "incomplete_reason=max_output_tokens" in caplog.text
+    assert "output_tokens=5193" in caplog.text
+    assert "reasoning_tokens=5000" in caplog.text
+    assert "resp_failed_456" in caplog.text
+    assert "submitted content" not in caplog.text
+
+
+class _FakeAsyncClient:
+    def __init__(self, response: httpx.Response):
+        self.response = response
+        self.request_url = None
+        self.request_headers = None
+        self.request_payload = None
+
+    async def post(self, url, *, headers, json):
+        self.request_url = url
+        self.request_headers = headers
+        self.request_payload = json
+        return self.response
+
+
+def test_extract_claims_sends_openrouter_metadata_header_and_logs_selected_model(
+    caplog,
+):
+    async def run_test():
+        response = httpx.Response(
+            200,
+            json={
+                "id": "resp_success_123",
+                "status": "completed",
+                "model": "example/free-model",
+                "openrouter_metadata": {
+                    "endpoints": {
+                        "available": [
+                            {
+                                "model": "example/free-model",
+                                "provider": "ExampleProvider",
+                                "selected": True,
+                            }
+                        ]
+                    }
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "status": "completed",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": '{"claims":[]}',
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        client = _FakeAsyncClient(response)
+        settings = Settings.model_construct(
+            openai_api_key=SecretStr("test-only-key"),
+            openai_model="openrouter/free",
+        )
+
+        with caplog.at_level(logging.INFO):
+            extraction = await extract_claims(
+                client=client,
+                settings=settings,
+                content="A harmless test draft.",
+            )
+
+        assert extraction.claims == []
+        assert client.request_url == "https://openrouter.ai/api/v1/responses"
+        assert client.request_headers["X-OpenRouter-Metadata"] == "enabled"
+        assert client.request_headers["Authorization"] == "Bearer test-only-key"
+        assert client.request_payload["model"] == "openrouter/free"
+        assert client.request_payload["provider"] == {"require_parameters": True}
+        assert client.request_payload["reasoning"] == {"enabled": False}
+        assert client.request_payload["max_output_tokens"] == 8192
+        assert client.request_payload["store"] is False
+        assert "selected_model=example/free-model" in caplog.text
+        assert "provider=ExampleProvider" in caplog.text
+        assert "resp_success_123" in caplog.text
+        assert "test-only-key" not in caplog.text
+        assert "harmless test draft" not in caplog.text
+
+    asyncio.run(run_test())
+
+
+def test_provider_schema_mirrors_pydantic_validation_constraints():
+    claims_schema = CLAIM_OUTPUT_SCHEMA["properties"]["claims"]
+    properties = claims_schema["items"]["properties"]
+
+    assert claims_schema["maxItems"] == 50
+    assert properties["exact_text"]["minLength"] == 1
+    assert properties["exact_text"]["maxLength"] == 3000
+    assert properties["subject"]["maxLength"] == 300
+    assert properties["attribute"]["maxLength"] == 300
+    assert properties["value_text"]["maxLength"] == 500
+    assert properties["numeric_value"]["maxLength"] == 50
+    assert properties["numeric_value"]["pattern"] == (
+        r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"
+    )
+    assert properties["unit"]["maxLength"] == 80
+    assert properties["qualifier"]["maxLength"] == 500
+    assert properties["conditions"]["maxLength"] == 3000
+    assert properties["product_scope"]["maxLength"] == 300
+    assert properties["channel_scope"]["maxLength"] == 300
+    assert properties["market_scope"]["maxLength"] == 300
+
+
+def test_validation_error_logs_only_field_path_and_error_type(caplog):
+    async def run_test():
+        claim = {
+            "exact_text": "Battery lasts 30 hours.",
+            "subject": "Laptop Model X",
+            "attribute": "battery life",
+            "claim_kind": "factual",
+            "value_text": "30 hours",
+            "numeric_value": "30 hours",
+            "unit": "hours",
+            "qualifier": None,
+            "conditions": None,
+            "product_scope": None,
+            "channel_scope": None,
+            "market_scope": None,
+            "extraction_note": "Numeric battery claim.",
+        }
+        output_text = json.dumps({"claims": [claim]})
+        response = httpx.Response(
+            200,
+            json={
+                "id": "resp_validation_test",
+                "status": "completed",
+                "model": "example/free-model",
+                "output": [
+                    {
+                        "type": "message",
+                        "status": "completed",
+                        "content": [
+                            {"type": "output_text", "text": output_text}
+                        ],
+                    }
+                ],
+            },
+        )
+        client = _FakeAsyncClient(response)
+        settings = Settings.model_construct(
+            openai_api_key=SecretStr("test-only-key"),
+            openai_model="openrouter/free",
+        )
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(HTTPException) as error:
+                await extract_claims(
+                    client=client,
+                    settings=settings,
+                    content="Private source draft that must not enter logs.",
+                )
+
+        assert error.value.status_code == 502
+        assert "validation_issues=claims.0.numeric_value:value_error" in caplog.text
+        assert "Battery lasts 30 hours" not in caplog.text
+        assert "30 hours" not in caplog.text
+        assert "Private source draft" not in caplog.text
+        assert "test-only-key" not in caplog.text
+
+    asyncio.run(run_test())

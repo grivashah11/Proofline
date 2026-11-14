@@ -99,6 +99,21 @@ class AnalysisTestGateway:
             if params.get("content_id") != f"eq.{self.content_id}":
                 return []
 
+            if params.get("revision_id") and params["revision_id"] != (
+                f"eq.{self.analysis['revision_id']}"
+            ):
+                return []
+
+            if params.get("model") and params["model"] != (
+                f"eq.{self.analysis['model']}"
+            ):
+                return []
+
+            if params.get("ai_extraction_status") and params["ai_extraction_status"] != (
+                f"eq.{self.analysis['ai_extraction_status']}"
+            ):
+                return []
+
             requested_id = params.get("id")
             if requested_id and requested_id != f"eq.{self.analysis['id']}":
                 return []
@@ -352,22 +367,225 @@ def test_analysis_persists_claim_needing_verification(
     assert finding["revision_id"] == str(gateway.revision_id)
 
 
-def test_analysis_saves_partial_result_when_ai_is_unavailable(
+def test_analysis_reuses_persisted_ai_extraction_for_same_revision(
     analysis_client,
     monkeypatch,
+):
+    client, gateway = analysis_client
+    extraction_calls = 0
+
+    async def fake_extract_claims(client, settings, content):
+        nonlocal extraction_calls
+        extraction_calls += 1
+        return AIClaimExtraction(
+            claims=[
+                ExtractedClaim(
+                    exact_text="Our test product keeps drinks cold for 24 hours.",
+                    subject="Test product",
+                    attribute="cold retention",
+                    claim_kind="factual",
+                    value_text="24",
+                    numeric_value="24",
+                    unit="hours",
+                    extraction_note="Candidate claim extracted from the draft.",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        analysis_endpoint,
+        "extract_claims",
+        fake_extract_claims,
+    )
+
+    first_response = client.post(analysis_url(gateway))
+    second_response = client.post(analysis_url(gateway))
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+    assert extraction_calls == 1
+    assert first_response.json()["analysis"]["ai_extraction_status"] == "completed"
+    assert second_response.json()["analysis"]["ai_extraction_status"] == "completed"
+    assert second_response.json()["findings"][0]["candidate_claim"]["exact_text"] == (
+        "Our test product keeps drinks cold for 24 hours."
+    )
+
+
+def test_analysis_cache_is_invalidated_for_a_new_revision(
+    analysis_client,
+    monkeypatch,
+):
+    client, gateway = analysis_client
+    extraction_calls = 0
+
+    async def fake_extract_claims(client, settings, content):
+        nonlocal extraction_calls
+        extraction_calls += 1
+        return AIClaimExtraction(
+            claims=[
+                ExtractedClaim(
+                    exact_text="Our test product keeps drinks cold for 24 hours.",
+                    subject="Test product",
+                    attribute="cold retention",
+                    claim_kind="factual",
+                    value_text="24",
+                    numeric_value="24",
+                    unit="hours",
+                    extraction_note="Candidate claim extracted from the draft.",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        analysis_endpoint,
+        "extract_claims",
+        fake_extract_claims,
+    )
+
+    first_response = client.post(analysis_url(gateway))
+    assert first_response.status_code == 201
+    assert extraction_calls == 1
+
+    new_revision_id = uuid4()
+    gateway.revision_id = new_revision_id
+    gateway.content["current_revision_id"] = str(new_revision_id)
+    gateway.revision = {
+        **gateway.revision,
+        "id": str(new_revision_id),
+        "revision_number": 2,
+    }
+
+    second_response = client.post(analysis_url(gateway))
+
+    assert second_response.status_code == 201
+    assert extraction_calls == 2
+
+
+def test_analysis_preserves_deterministic_findings_when_ai_fails(
+    analysis_client,
+    monkeypatch,
+):
+    client, gateway = analysis_client
+    original_request = gateway.request
+
+    async def request_with_brand_rule(method, resource, *, params=None, **kwargs):
+        if resource == "brand_rules":
+            return [
+                {
+                    "id": str(uuid4()),
+                    "rule_kind": "brand_voice",
+                    "title": "Brand voice requires human review",
+                    "rule_text": "Use concise, factual wording.",
+                    "tone_examples": None,
+                    "channel": None,
+                    "check_type": "manual_review",
+                    "check_value": None,
+                }
+            ]
+        return await original_request(method, resource, params=params, **kwargs)
+
+    async def unavailable_ai(client, settings, content):
+        raise HTTPException(status_code=502, detail="Synthetic incomplete AI response.")
+
+    monkeypatch.setattr(gateway, "request", request_with_brand_rule)
+    monkeypatch.setattr(
+        analysis_endpoint,
+        "extract_claims",
+        unavailable_ai,
+    )
+
+    response = client.post(analysis_url(gateway))
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["analysis"]["status"] == "partial"
+    assert result["analysis"]["ai_extraction_status"] == "unavailable"
+    assert any(
+        finding["source"] == "brand_rule"
+        and finding["title"] == "Brand voice requires human review"
+        for finding in result["findings"]
+    )
+
+
+def test_analysis_retries_live_ai_when_persisted_cache_cannot_be_read(
+    analysis_client,
+    monkeypatch,
+):
+    client, gateway = analysis_client
+    extraction_calls = 0
+    original_request = gateway.request
+
+    async def request_with_cache_read_failure(method, resource, *, params=None, **kwargs):
+        if resource == "analysis_runs":
+            raise HTTPException(status_code=503, detail="Synthetic cache read failure.")
+        return await original_request(method, resource, params=params, **kwargs)
+
+    async def fake_extract_claims(client, settings, content):
+        nonlocal extraction_calls
+        extraction_calls += 1
+        return AIClaimExtraction(claims=[])
+
+    monkeypatch.setattr(gateway, "request", request_with_cache_read_failure)
+    monkeypatch.setattr(
+        analysis_endpoint,
+        "extract_claims",
+        fake_extract_claims,
+    )
+
+    response = client.post(analysis_url(gateway))
+
+    assert response.status_code == 201
+    assert extraction_calls == 1
+    assert response.json()["analysis"]["status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "failure_status",
+    [422, 429, 502, 503],
+)
+def test_analysis_saves_partial_result_when_ai_returns_http_error(
+    analysis_client,
+    monkeypatch,
+    failure_status,
 ):
     client, gateway = analysis_client
 
     async def unavailable_ai(client, settings, content):
         raise HTTPException(
-            status_code=503,
-            detail="Free-model quota reached.",
+            status_code=failure_status,
+            detail="Provider failure details are intentionally not exposed.",
         )
 
     monkeypatch.setattr(
         analysis_endpoint,
         "extract_claims",
         unavailable_ai,
+    )
+
+    response = client.post(analysis_url(gateway))
+
+    assert response.status_code == 201
+
+    result = response.json()
+
+    assert result["analysis"]["status"] == "partial"
+    assert result["analysis"]["ai_extraction_status"] == "unavailable"
+    assert result["analysis"]["human_approval_required"] is True
+
+
+def test_analysis_saves_partial_result_when_ai_client_raises_unexpected_error(
+    analysis_client,
+    monkeypatch,
+):
+    client, gateway = analysis_client
+
+    async def broken_ai(client, settings, content):
+        raise RuntimeError("Synthetic provider client failure.")
+
+    monkeypatch.setattr(
+        analysis_endpoint,
+        "extract_claims",
+        broken_ai,
     )
 
     response = client.post(analysis_url(gateway))
