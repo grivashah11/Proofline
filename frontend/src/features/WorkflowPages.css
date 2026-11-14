@@ -1604,3 +1604,40 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Creator-visible Brand Owner review decision history */
+.reviewer-decision-list {
+  margin-top: 10px;
+}
+
+.reviewer-decision-item {
+  align-items: flex-start;
+}
+
+.reviewer-decision-item .revision-history-number {
+  margin-top: 1px;
+}
+
+.reviewer-decision-item .outcome-pill {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.reviewer-decision-note,
+.reviewer-decision-no-note {
+  margin: 6px 0 0;
+  font-size: 9px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reviewer-decision-note {
+  color: #c9bdd8;
+}
+
+.reviewer-decision-no-note {
+  color: #897c98;
+  font-style: italic;
+}

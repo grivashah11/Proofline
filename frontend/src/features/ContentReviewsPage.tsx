@@ -545,14 +545,54 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
 
               <section className="workflow-section-block">
                 <div className="workflow-section-heading"><div><p className="eyebrow">DISCUSSION</p><h3>Revision comments</h3></div><span className="revision-tag">{comments.length} COMMENTS</span></div>
-                {comments.length === 0 ? <p className="workflow-muted-copy">No comments on the current revision yet.</p> : <div className="comment-list">{comments.map((comment) => <article className="comment-item" key={comment.id}><div className="comment-avatar"><MessageSquareText size={14} /></div><div><p>{comment.body}</p><small>{comment.created_by === user?.id ? 'You' : `Member ${comment.created_by.slice(0, 8)}`} · {formatDate(comment.created_at)}</small></div></article>)}</div>}
+                <p className="workflow-muted-copy">Comments posted here are discussion messages. Formal Brand Owner decisions and their reviewer notes are shown separately in Review history below.</p>
+                {comments.length === 0 ? <p className="workflow-muted-copy">No discussion comments have been added to the current revision yet.</p> : <div className="comment-list">{comments.map((comment) => <article className="comment-item" key={comment.id}><div className="comment-avatar"><MessageSquareText size={14} /></div><div><p>{comment.body}</p><small>{comment.created_by === user?.id ? 'You' : `Member ${comment.created_by.slice(0, 8)}`} · {formatDate(comment.created_at)}</small></div></article>)}</div>}
                 {currentRevision && <form className="comment-form" onSubmit={handleComment}><input value={commentText} onChange={(event: { target: { value: string } }) => setCommentText(event.target.value)} placeholder="Add a note to this revision..." maxLength={5000} aria-label="Add a comment" /><button className="button button-secondary" type="submit" disabled={!commentText.trim() || busy !== ''}>{busy === 'comment' ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />} Comment</button></form>}
               </section>
 
               <section className="workflow-section-block revision-history-block">
                 <div className="workflow-section-heading"><div><p className="eyebrow">VERSION HISTORY</p><h3>Saved revisions</h3></div><span className="revision-tag">{detail.revisions.length} VERSIONS</span></div>
                 <div className="revision-history-list">{detail.revisions.map((revision) => <div className="revision-history-item" key={revision.id}><span className="revision-history-number">R{revision.revision_number}</span><div><strong>{revision.id === detail.content.current_revision_id ? 'Current revision' : 'Previous revision'}</strong><small>{formatDate(revision.created_at)} · {revision.content_text.length.toLocaleString('en-IN')} characters</small></div>{revision.id === detail.content.current_revision_id && <span className="current-version-dot" />}</div>)}</div>
-                {decisions.length > 0 && <div className="decision-history"><strong>Latest reviewer decision</strong><span className={`outcome-pill outcome-${decisions[0].decision === 'approved' ? 'supported' : decisions[0].decision === 'rejected' ? 'conflict' : 'needs_review'}`}>{decisions[0].decision.replace('_', ' ')}</span>{decisions[0].reviewer_comment && <p>{decisions[0].reviewer_comment}</p>}</div>}
+              </section>
+
+              <section className="workflow-section-block reviewer-history-section">
+                <div className="workflow-section-heading"><div><p className="eyebrow">REVIEW HISTORY</p><h3>Brand Owner decisions</h3></div><span className="revision-tag">{decisions.length} DECISIONS</span></div>
+                {decisions.length === 0 ? <p className="workflow-muted-copy">No Brand Owner decisions have been recorded for this submission yet.</p> : (
+                  <div className="revision-history-list reviewer-decision-list">
+                    {decisions.map((decision) => {
+                      const reviewedRevision = detail.revisions.find((revision) => revision.id === decision.revision_id)
+                      const decisionTitle = decision.decision === 'changes_requested'
+                        ? 'Changes requested'
+                        : decision.decision === 'approved'
+                          ? 'Approved'
+                          : 'Rejected'
+                      const decisionMarker = decision.decision === 'approved'
+                        ? '✓'
+                        : decision.decision === 'rejected'
+                          ? '×'
+                          : '↺'
+                      const outcome = decision.decision === 'approved'
+                        ? 'supported'
+                        : decision.decision === 'rejected'
+                          ? 'conflict'
+                          : 'needs_review'
+
+                      return (
+                        <article className="revision-history-item reviewer-decision-item" key={decision.id}>
+                          <span className="revision-history-number">{decisionMarker}</span>
+                          <div>
+                            <strong>{decisionTitle}</strong>
+                            <small>{reviewedRevision ? `Revision ${reviewedRevision.revision_number} · ` : ''}{formatDate(decision.created_at)}</small>
+                            {decision.reviewer_comment
+                              ? <p className="reviewer-decision-note">{decision.reviewer_comment}</p>
+                              : <p className="reviewer-decision-no-note">No reviewer note was provided for this decision.</p>}
+                          </div>
+                          <span className={`outcome-pill outcome-${outcome}`}>{decisionTitle}</span>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
               </section>
             </>
           )}

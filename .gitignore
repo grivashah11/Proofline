@@ -1,0 +1,90 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Node dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Local backups
+*.backup
+*.bak
+*.bak-*
+
+# Old project snapshots
+frontend-before-integration/
+
+# Temporary project archives
+/proofline-*.zip
+
+# Temporary image test files
+/test-approved-logo.png
+/test-unapproved-image.png
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local backups
+*.backup
+*.bak
+*.bak-*
+
+# Temporary deployment archives
+/proofline-*.zip
+
+# Test images
+/test-approved-logo.png
+/test-unapproved-image.png
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -1,0 +1,15 @@
+PROOFLINE DEPLOYMENT PREPARATION
+
+Files:
+- backend/requirements.txt: production runtime dependencies pinned to the versions reported by the working local backend environment.
+- backend/requirements-dev.txt: runtime dependencies plus pytest for CI/local test runs.
+- backend/.python-version: pins the Render Python runtime to 3.13.17, matching the local environment.
+
+Render backend service settings:
+- Runtime: Python 3
+- Root Directory: backend
+- Build Command: pip install -r requirements.txt
+- Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+- Health Check Path: /api/v1/health
+
+Do not commit .env files or add secret values to these files.
