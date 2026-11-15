@@ -944,3 +944,340 @@
   line-height: 1.6;
   text-align: center;
 }
+
+
+/* Post-signup role selection and focused onboarding panels */
+.onboarding-page {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.onboarding-role-card {
+  width: min(100%, 760px);
+  padding: 34px;
+}
+
+.onboarding-role-heading {
+  max-width: 540px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.onboarding-role-heading .onboarding-icon {
+  margin: 0 auto 17px;
+}
+
+.onboarding-role-heading .onboarding-description {
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.onboarding-role-card h1 {
+  margin: 8px 0 10px;
+}
+
+.onboarding-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  margin-top: 30px;
+}
+
+.onboarding-role-option {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 245px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 23px;
+  border: 1px solid rgba(190, 160, 232, 0.22);
+  border-radius: 15px;
+  background: linear-gradient(150deg, rgba(39, 28, 58, 0.88), rgba(20, 14, 31, 0.94));
+  color: #f6f0ff;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.onboarding-role-option:hover {
+  transform: translateY(-2px);
+  border-color: rgba(174, 143, 246, 0.58);
+  background: linear-gradient(150deg, rgba(49, 35, 72, 0.96), rgba(24, 17, 37, 0.98));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2);
+}
+
+.onboarding-role-option:focus-visible,
+.onboarding-back-link:focus-visible {
+  outline: 2px solid #b99aff;
+  outline-offset: 3px;
+}
+
+.onboarding-role-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid rgba(174, 143, 246, 0.25);
+  border-radius: 13px;
+  background: rgba(139, 92, 246, 0.13);
+  color: #c6abff;
+}
+
+.onboarding-role-label {
+  color: #a890d1;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 1.2px;
+}
+
+.onboarding-role-option > strong {
+  color: #faf6ff;
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.45px;
+}
+
+.onboarding-role-description {
+  color: #a99dbb;
+  font-size: 10px;
+  line-height: 1.75;
+}
+
+.onboarding-role-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 9px;
+  color: #c6abff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.onboarding-role-footnote {
+  margin: 19px 0 0;
+  color: #837691;
+  font-size: 9px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.onboarding-detail-card {
+  width: min(100%, 540px);
+}
+
+.onboarding-back-link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  margin: -8px 0 20px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: #b9a5d7;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.onboarding-back-link:hover {
+  color: #e1d3f6;
+}
+
+.onboarding-detail-card .onboarding-description {
+  margin-bottom: 20px;
+}
+
+.onboarding-detail-card .owner-note {
+  margin-top: 18px;
+}
+
+.onboarding-creator-id-panel {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 13px;
+  margin: 19px 0 20px;
+  padding: 14px;
+  border: 1px solid rgba(174, 143, 246, 0.23);
+  border-radius: 11px;
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.onboarding-creator-id-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.onboarding-field-label {
+  color: #a890d1;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 1.05px;
+}
+
+.onboarding-creator-id-copy code {
+  color: #e1d5f2;
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.onboarding-copy-id-button {
+  flex-shrink: 0;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.onboarding-creator-steps {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-creator-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.onboarding-creator-steps li > span {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid rgba(174, 143, 246, 0.25);
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.12);
+  color: #c6abff;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.onboarding-creator-steps p {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+
+.onboarding-creator-steps strong {
+  color: #e9e0f5;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.onboarding-creator-steps small {
+  color: #978ba6;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.onboarding-refresh-button {
+  margin-top: 20px;
+}
+
+.onboarding-creator-note {
+  margin: 12px 0 0;
+  color: #897d98;
+  font-size: 9px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.onboarding-access-message {
+  margin-top: 14px;
+  color: #c6abff;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.onboarding-signout-area {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 540px);
+  margin: 0 auto 18px;
+}
+
+.onboarding-signout-button {
+  width: 100%;
+  min-height: 40px;
+  justify-content: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.onboarding-signout-error {
+  margin: 9px 0 0;
+  color: #f0a6b5;
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .onboarding-role-card {
+    padding: 25px 19px;
+  }
+
+  .onboarding-role-grid {
+    grid-template-columns: 1fr;
+    gap: 11px;
+    margin-top: 22px;
+  }
+
+  .onboarding-role-option {
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .onboarding-role-action {
+    padding-top: 2px;
+  }
+
+  .onboarding-creator-id-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .onboarding-copy-id-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .onboarding-detail-card {
+    padding: 23px 19px;
+  }
+
+  .onboarding-role-heading h1 {
+    font-size: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-role-option {
+    transition: none;
+  }
+
+  .onboarding-role-option:hover {
+    transform: none;
+  }
+}

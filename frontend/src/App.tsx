@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   Activity,
   ArrowRight,
+  ArrowLeft,
   ArrowUpRight,
   BadgeCheck,
   BookOpenCheck,
@@ -484,6 +485,7 @@ function WorkspaceOnboarding({
   onSignOut: () => Promise<void>
   userId: string
 }) {
+  const [selectedPath, setSelectedPath] = useState<'choose' | 'owner' | 'creator'>('choose')
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [slugTouched, setSlugTouched] = useState(false)
@@ -498,8 +500,12 @@ function WorkspaceOnboarding({
     try {
       await navigator.clipboard.writeText(userId)
       setCopiedId(true)
+      setAccessMessage('Creator ID copied. Share it with your Brand Owner.')
     } catch {
-      setAccessMessage('Clipboard access is unavailable. Select and copy your account ID manually.')
+      setCopiedId(false)
+      setAccessMessage(
+        'Clipboard access is unavailable. Select and copy your Creator ID manually.',
+      )
     }
   }
 
@@ -522,13 +528,21 @@ function WorkspaceOnboarding({
 
   async function refreshWorkspaceAccess() {
     setAccessMessage('')
+    setCopiedId(false)
+
     try {
       const count = await onCreated()
       if (count === 0) {
-        setAccessMessage('No workspace membership found yet. Ask the Brand Owner to add your account ID, then refresh again.')
+        setAccessMessage(
+          'No workspace membership found yet. Ask the Brand Owner to add your Creator ID, then refresh again.',
+        )
       }
     } catch (err) {
-      setAccessMessage(err instanceof Error ? err.message : 'Unable to refresh workspace access.')
+      setAccessMessage(
+        err instanceof Error
+          ? err.message
+          : 'Unable to refresh workspace access.',
+      )
     }
   }
 
@@ -538,6 +552,19 @@ function WorkspaceOnboarding({
     if (!slugTouched) {
       setSlug(makeWorkspaceSlug(value))
     }
+  }
+
+  function selectPath(path: 'owner' | 'creator') {
+    setError('')
+    setAccessMessage('')
+    setCopiedId(false)
+    setSelectedPath(path)
+  }
+
+  function backToRoleChoices() {
+    setError('')
+    setAccessMessage('')
+    setSelectedPath('choose')
   }
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
@@ -588,92 +615,273 @@ function WorkspaceOnboarding({
         <strong>proofline</strong>
       </div>
 
-      <motion.section
-        className="onboarding-card"
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <div className="onboarding-step">YOUR FIRST STEP · 01 OF 01</div>
-        <div className="onboarding-icon">
-          <Sparkles size={25} />
-        </div>
-        <p className="auth-eyebrow">WELCOME TO PROOFLINE</p>
-        <h1>Let's set up your brand workspace.</h1>
-        <p className="onboarding-description">
-          Give your team one place to manage brand rules, verify important
-          claims and review content before it gets published.
-        </p>
-
-        <form className="onboarding-form" onSubmit={handleCreate}>
-          <label htmlFor="workspace-name">What is your brand or workspace called?</label>
-          <input
-            id="workspace-name"
-            value={name}
-            onChange={(event) => updateName(event.target.value)}
-            placeholder="e.g. Acme Studio"
-            maxLength={120}
-            required
-          />
-
-          <label htmlFor="workspace-slug">Workspace URL name</label>
-          <div className="slug-input">
-            <span>proofline.app/</span>
-            <input
-              id="workspace-slug"
-              value={slug}
-              onChange={(event) => {
-                setSlugTouched(true)
-                setSlug(event.target.value)
-              }}
-              placeholder="acme-studio"
-              maxLength={63}
-              required
-            />
-          </div>
-          <p className="field-help">
-            Lowercase letters, numbers and hyphens only.
-          </p>
-
-          {error && (
-            <div className="auth-error" role="alert">
-              {error}
+      <AnimatePresence mode="wait">
+        {selectedPath === 'choose' && (
+          <motion.section
+            key="role-choice"
+            className="onboarding-card onboarding-role-card"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.18 }}
+          >
+            <div className="onboarding-role-heading">
+              <div className="onboarding-icon">
+                <Sparkles size={25} />
+              </div>
+              <p className="auth-eyebrow">WELCOME TO PROOFLINE</p>
+              <h1>How would you like to use Proofline?</h1>
+              <p className="onboarding-description">
+                Choose the option that best describes your role. You can
+                continue in just one step.
+              </p>
             </div>
-          )}
 
-          <button className="auth-primary-button" type="submit" disabled={busy}>
-            {busy ? (
-              <>
-                <LoaderCircle className="spin-icon" size={17} />
-                Creating workspace...
-              </>
-            ) : (
-              <>
-                Create my workspace <ArrowRight size={17} />
-              </>
+            <div className="onboarding-role-grid">
+              <button
+                className="onboarding-role-option"
+                type="button"
+                onClick={() => selectPath('owner')}
+              >
+                <span className="onboarding-role-icon">
+                  <ShieldCheck size={23} />
+                </span>
+                <span className="onboarding-role-label">FOR BRAND TEAMS</span>
+                <strong>I'm a Brand Owner</strong>
+                <span className="onboarding-role-description">
+                  Create a workspace to manage your brand rules, approved
+                  claims, team and content reviews.
+                </span>
+                <span className="onboarding-role-action">
+                  Create a workspace <ArrowRight size={16} />
+                </span>
+              </button>
+
+              <button
+                className="onboarding-role-option"
+                type="button"
+                onClick={() => selectPath('creator')}
+              >
+                <span className="onboarding-role-icon">
+                  <UsersRound size={23} />
+                </span>
+                <span className="onboarding-role-label">FOR CONTRIBUTORS</span>
+                <strong>I'm a Creator</strong>
+                <span className="onboarding-role-description">
+                  Join a brand workspace you're already working with and
+                  submit content for review.
+                </span>
+                <span className="onboarding-role-action">
+                  Join a workspace <ArrowRight size={16} />
+                </span>
+              </button>
+            </div>
+
+            <p className="onboarding-role-footnote">
+              Not sure? Choose Brand Owner only if you are setting up a new
+              workspace. Choose Creator if a brand team will add you.
+            </p>
+          </motion.section>
+        )}
+
+        {selectedPath === 'owner' && (
+          <motion.section
+            key="brand-owner"
+            className="onboarding-card onboarding-detail-card"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.18 }}
+          >
+            <button
+              className="onboarding-back-link"
+              type="button"
+              onClick={backToRoleChoices}
+            >
+              <ArrowLeft size={15} /> Change role
+            </button>
+
+            <div className="onboarding-icon">
+              <ShieldCheck size={25} />
+            </div>
+            <p className="auth-eyebrow">BRAND OWNER · CREATE A WORKSPACE</p>
+            <h1>Create your brand workspace.</h1>
+            <p className="onboarding-description">
+              Set up a shared place to manage brand rules, verify important
+              claims and review content before it gets published.
+            </p>
+
+            <form className="onboarding-form" onSubmit={handleCreate}>
+              <label htmlFor="workspace-name">
+                What is your brand or workspace called?
+              </label>
+              <input
+                id="workspace-name"
+                value={name}
+                onChange={(event) => updateName(event.target.value)}
+                placeholder="e.g. Acme Studio"
+                maxLength={120}
+                required
+              />
+
+              <label htmlFor="workspace-slug">Workspace URL name</label>
+              <div className="slug-input">
+                <span>proofline.app/</span>
+                <input
+                  id="workspace-slug"
+                  value={slug}
+                  onChange={(event) => {
+                    setSlugTouched(true)
+                    setSlug(event.target.value)
+                  }}
+                  placeholder="acme-studio"
+                  maxLength={63}
+                  required
+                />
+              </div>
+              <p className="field-help">
+                Lowercase letters, numbers and hyphens only.
+              </p>
+
+              {error && (
+                <div className="auth-error" role="alert">
+                  {error}
+                </div>
+              )}
+
+              <button
+                className="auth-primary-button"
+                type="submit"
+                disabled={busy}
+              >
+                {busy ? (
+                  <>
+                    <LoaderCircle className="spin-icon" size={17} />
+                    Creating workspace...
+                  </>
+                ) : (
+                  <>
+                    Create my workspace <ArrowRight size={17} />
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="owner-note">
+              <ShieldCheck size={16} />
+              <span>
+                You'll become the <strong>Brand Owner</strong> and manage
+                this workspace's rules, Claim Passports and team access.
+              </span>
+            </div>
+          </motion.section>
+        )}
+
+        {selectedPath === 'creator' && (
+          <motion.section
+            key="creator"
+            className="onboarding-card onboarding-detail-card onboarding-creator-card"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.18 }}
+          >
+            <button
+              className="onboarding-back-link"
+              type="button"
+              onClick={backToRoleChoices}
+            >
+              <ArrowLeft size={15} /> Change role
+            </button>
+
+            <div className="onboarding-icon">
+              <UsersRound size={25} />
+            </div>
+            <p className="auth-eyebrow">CREATOR · JOIN A WORKSPACE</p>
+            <h1>Join your brand's workspace.</h1>
+            <p className="onboarding-description">
+              Share your Creator ID with the Brand Owner. They'll add your
+              existing account to their workspace.
+            </p>
+
+            <div className="onboarding-creator-id-panel">
+              <div className="onboarding-creator-id-copy">
+                <span className="onboarding-field-label">
+                  YOUR CREATOR ACCOUNT ID
+                </span>
+                <code>{userId}</code>
+              </div>
+              <button
+                className="button button-secondary onboarding-copy-id-button"
+                type="button"
+                onClick={() => void copyAccountId()}
+              >
+                <Clipboard size={15} />
+                {copiedId ? 'Copied' : 'Copy ID'}
+              </button>
+            </div>
+
+            <ol className="onboarding-creator-steps">
+              <li>
+                <span>1</span>
+                <p>
+                  <strong>Copy your Creator ID</strong>
+                  <small>Use the button above.</small>
+                </p>
+              </li>
+              <li>
+                <span>2</span>
+                <p>
+                  <strong>Send it to your Brand Owner</strong>
+                  <small>
+                    They can add you from their Team Members page.
+                  </small>
+                </p>
+              </li>
+              <li>
+                <span>3</span>
+                <p>
+                  <strong>Return here after you've been added</strong>
+                  <small>Refresh your access to open the workspace.</small>
+                </p>
+              </li>
+            </ol>
+
+            {accessMessage && (
+              <p className="onboarding-access-message" role="status">
+                {accessMessage}
+              </p>
             )}
-          </button>
-        </form>
 
-        <div className="owner-note">
-          <ShieldCheck size={16} />
-          <span>
-            Creating a new workspace makes you its <strong>Brand Owner</strong>. To join an existing workspace as a Creator, share your account ID below instead.
-          </span>
-        </div>
+            <button
+              className="auth-primary-button onboarding-refresh-button"
+              type="button"
+              onClick={() => void refreshWorkspaceAccess()}
+            >
+              <RefreshCw size={16} />
+              I've been added — refresh access
+            </button>
+
+            <p className="onboarding-creator-note">
+              You don't need to create a workspace to join an existing brand.
+            </p>
+          </motion.section>
+        )}
+      </AnimatePresence>
+
+      <div className="onboarding-signout-area">
         <button
-          className="button button-secondary onboarding-back-button"
+          className="button button-secondary onboarding-signout-button"
           type="button"
           onClick={() => void handleBackToAuth()}
           disabled={signingOut}
         >
           {signingOut ? (
-            <LoaderCircle size={16} className="spin-icon" />
+            <LoaderCircle size={15} className="spin-icon" />
           ) : (
-            <LogOut size={16} />
+            <LogOut size={15} />
           )}
-          {signingOut
-            ? 'Signing out...'
-            : 'Back to Sign in / Create Account'}
+          {signingOut ? 'Signing out...' : 'Back to Sign in / Create Account'}
         </button>
 
         {signOutError && (
@@ -681,20 +889,8 @@ function WorkspaceOnboarding({
             {signOutError}
           </p>
         )}
-      </motion.section>
-      <section className="onboarding-join-card">
-        <div>
-          <p className="auth-eyebrow">JOIN AN EXISTING WORKSPACE</p>
-          <strong>Already registered as a Creator?</strong>
-          <p>Send this account ID to the Brand Owner. They can add your existing account to their workspace.</p>
-          <code>{userId}</code>
-        </div>
-        <div className="onboarding-join-actions">
-          <button className="button button-secondary" type="button" onClick={() => void copyAccountId()}><Clipboard size={15} />{copiedId ? 'Copied' : 'Copy account ID'}</button>
-          <button className="button button-secondary" type="button" onClick={() => void refreshWorkspaceAccess()}><RefreshCw size={15} />I've been added · Refresh</button>
-        </div>
-        {accessMessage && <p className="onboarding-access-message" role="status">{accessMessage}</p>}
-      </section>
+      </div>
+
       <p className="onboarding-footer">YOUR BRAND. YOUR RULES. YOUR PROOF.</p>
     </div>
   )
