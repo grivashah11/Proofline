@@ -135,6 +135,12 @@ class PassportVersionCreate(BaseModel):
 
     review_by: date | None = None
 
+    # Optional source-document linkage. All three fields must be supplied
+    # together; existing manual URL/reference evidence remains supported.
+    source_document_id: UUID | None = None
+    source_document_segment_id: UUID | None = None
+    source_excerpt: str | None = Field(default=None, min_length=1, max_length=10000)
+
     @field_validator(
         "approved_wording",
         "subject",
@@ -161,6 +167,7 @@ class PassportVersionCreate(BaseModel):
         "evidence_reference",
         "evidence_excerpt",
         "evidence_source_version",
+        "source_excerpt",
     )
     @classmethod
     def normalize_optional_text(cls, value: str | None):
@@ -173,6 +180,21 @@ class PassportVersionCreate(BaseModel):
     def validate_version_data(self):
         if self.numeric_value is not None and not self.unit:
             raise ValueError("A unit is required when a numeric value is provided.")
+
+        linked_source_fields = (
+            self.source_document_id,
+            self.source_document_segment_id,
+            self.source_excerpt,
+        )
+        if any(value is not None for value in linked_source_fields) and not all(
+            value is not None for value in linked_source_fields
+        ):
+            raise ValueError(
+                "source_document_id, source_document_segment_id and source_excerpt "
+                "must be supplied together."
+            )
+        if self.source_excerpt is not None and not self.source_excerpt.strip():
+            raise ValueError("source_excerpt cannot be blank.")
 
         if (
             self.valid_from is not None

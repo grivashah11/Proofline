@@ -23,7 +23,7 @@ from app.schemas.claim_extraction import AIClaimExtraction, ExtractedClaim
 from app.services.ai.openai_client import extract_claims
 from app.services.analysis_service import build_analysis_findings
 from app.schemas.manual_claims import ManualClaimCreate
-from app.services.claim_matcher import locate_exact_excerpt, match_claims, normalize_text
+from app.services.claim_matcher import locate_exact_excerpt, match_claims, normalize_scope
 from app.services.rule_engine import run_rule_engine
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ def filter_passports_by_product(
     selected_passports: list[dict] = []
     selected_versions: list[dict] = []
 
-    product_name = normalize_text(product_context)
+    product_name = normalize_scope(product_context)
 
     for passport in passports:
         version_id = passport.get("current_version_id")
@@ -141,7 +141,7 @@ def filter_passports_by_product(
         if version is None:
             continue
 
-        product_scope = normalize_text(version.get("product_scope"))
+        product_scope = normalize_scope(version.get("product_scope"))
 
         if product_scope and (not product_name or product_name != product_scope):
             continue

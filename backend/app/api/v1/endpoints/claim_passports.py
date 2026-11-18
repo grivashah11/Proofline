@@ -1,3 +1,4 @@
+from datetime import date, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -21,6 +22,12 @@ from app.schemas.claim_passports import (
     ClaimPassportRecord,
     PassportVersionCreate,
     PassportVersionRecord,
+)
+from app.services.claim_matcher import INDIA_TIMEZONE
+from app.schemas.source_documents import (
+    ClaimPassportVersionSourceRecord,
+    PassportReverificationReminder,
+    ReverificationStatus,
 )
 
 router = APIRouter(
@@ -138,6 +145,90 @@ async def create_claim_passport(
 
 
 @router.get(
+    "/reverification-reminders",
+    response_model=list[PassportReverificationReminder],
+    summary="List active Claim Passports due for re-verification or expiry",
+)
+async def list_reverification_reminders(
+    workspace_id: UUID,
+    auth: AuthDependency,
+    gateway: GatewayDependency,
+    within_days: int = Query(default=30, ge=0, le=365),
+) -> list[PassportReverificationReminder]:
+    await require_workspace_owner(workspace_id, auth, gateway)
+
+    today = datetime.now(INDIA_TIMEZONE).date()
+    cutoff = today + timedelta(days=within_days)
+    versions = await gateway.request(
+        "GET",
+        "claim_passport_versions",
+        params={
+            "select": "id,claim_passport_id,version_number,review_by,valid_until,status",
+            "workspace_id": f"eq.{workspace_id}",
+            "status": "eq.active",
+            "or": (
+                f"(review_by.lte.{cutoff.isoformat()}"
+                f",valid_until.lte.{cutoff.isoformat()})"
+            ),
+            "order": "review_by.asc",
+            "limit": "200",
+        },
+    )
+
+    if not versions:
+        return []
+
+    passport_ids = sorted({str(item["claim_passport_id"]) for item in versions})
+    passports = await gateway.request(
+        "GET",
+        "claim_passports",
+        params={
+            "select": "id,passport_code,subject",
+            "workspace_id": f"eq.{workspace_id}",
+            "id": f"in.({','.join(passport_ids)})",
+        },
+    )
+    passport_by_id = {str(item["id"]): item for item in passports}
+
+    reminders: list[PassportReverificationReminder] = []
+    for version in versions:
+        passport = passport_by_id.get(str(version["claim_passport_id"]))
+        if passport is None:
+            continue
+
+        review_by = date.fromisoformat(version["review_by"]) if version.get("review_by") else None
+        valid_until_value = version.get("valid_until")
+        valid_until = date.fromisoformat(valid_until_value) if valid_until_value else None
+        action_dates = [value for value in (review_by, valid_until) if value is not None]
+        if not action_dates:
+            continue
+
+        action_date = min(action_dates)
+        if valid_until is not None and valid_until < today:
+            reminder_status = ReverificationStatus.EXPIRED
+        elif review_by is not None and review_by < today:
+            reminder_status = ReverificationStatus.OVERDUE
+        else:
+            reminder_status = ReverificationStatus.DUE_SOON
+
+        reminders.append(
+            PassportReverificationReminder(
+                passport_id=passport["id"],
+                passport_code=passport["passport_code"],
+                subject=passport["subject"],
+                version_id=version["id"],
+                version_number=version["version_number"],
+                review_by=review_by,
+                valid_until=valid_until,
+                status=reminder_status,
+                days_until_action=(action_date - today).days,
+            )
+        )
+
+    return sorted(reminders, key=lambda item: item.days_until_action)
+
+
+@router.get(
     "/{passport_id}",
     response_model=ClaimPassportRecord,
     summary="Get a Claim Passport",
@@ -202,6 +293,52 @@ async def list_passport_versions(
     return [PassportVersionRecord.model_validate(record) for record in records]
 
 
+@router.get(
+    "/{passport_id}/versions/{version_id}/sources",
+    response_model=list[ClaimPassportVersionSourceRecord],
+    summary="List source-document excerpts linked to a Passport version",
+)
+async def list_passport_version_sources(
+    workspace_id: UUID,
+    passport_id: UUID,
+    version_id: UUID,
+    auth: AuthDependency,
+    gateway: GatewayDependency,
+) -> list[ClaimPassportVersionSourceRecord]:
+    await require_workspace_member(workspace_id, auth, gateway)
+    await get_passport_or_404(workspace_id, passport_id, gateway)
+
+    versions = await gateway.request(
+        "GET",
+        "claim_passport_versions",
+        params={
+            "select": "id",
+            "id": f"eq.{version_id}",
+            "claim_passport_id": f"eq.{passport_id}",
+            "workspace_id": f"eq.{workspace_id}",
+            "limit": "1",
+        },
+    )
+    if not versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Claim Passport version not found.",
+        )
+
+    records = await gateway.request(
+        "GET",
+        "claim_passport_version_sources",
+        params={
+            "select": "*",
+            "claim_passport_id": f"eq.{passport_id}",
+            "passport_version_id": f"eq.{version_id}",
+            "workspace_id": f"eq.{workspace_id}",
+            "order": "created_at.asc",
+        },
+    )
+    return [ClaimPassportVersionSourceRecord.model_validate(record) for record in records]
+
+
 @router.post(
     "/{passport_id}/versions",
     response_model=PassportVersionRecord,
@@ -233,6 +370,31 @@ async def create_passport_version(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot create a version for a retired Passport.",
         )
+
+    if data.source_document_id is not None:
+        result = await gateway.rpc(
+            "create_claim_passport_version_from_source",
+            {
+                "p_claim_passport_id": str(passport_id),
+                "p_source_document_id": str(data.source_document_id),
+                "p_source_segment_id": str(data.source_document_segment_id),
+                "p_source_excerpt": data.source_excerpt,
+                "p_version_data": data.model_dump(
+                    mode="json",
+                    exclude={
+                        "source_document_id",
+                        "source_document_segment_id",
+                        "source_excerpt",
+                    },
+                ),
+            },
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("version"), dict):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Document-backed Passport version creation returned an invalid response.",
+            )
+        return PassportVersionRecord.model_validate(result["version"])
 
     existing_versions = await gateway.request(
         "GET",

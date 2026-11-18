@@ -16,6 +16,8 @@ from app.schemas.contents import (
     ContentStatus,
     ContentWithRevision,
 )
+from app.schemas.governance import RevisionDiffResponse
+from app.services.revision_diff import build_revision_diff
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/contents",
@@ -235,3 +237,54 @@ async def create_content_revision(
     )
 
     return parse_content_with_revision(result)
+
+
+@router.get(
+    "/{content_id}/revision-diff",
+    response_model=RevisionDiffResponse,
+    summary="Compare two immutable content revisions",
+)
+async def compare_content_revisions(
+    workspace_id: UUID,
+    content_id: UUID,
+    auth: AuthDependency,
+    gateway: GatewayDependency,
+    from_revision_id: UUID = Query(...),
+    to_revision_id: UUID = Query(...),
+) -> RevisionDiffResponse:
+    await require_workspace_member(workspace_id, auth, gateway)
+    await get_content_or_404(workspace_id, content_id, gateway)
+
+    if from_revision_id == to_revision_id:
+        # A same-revision comparison is valid and produces an all-equal diff.
+        revision_ids = [str(from_revision_id)]
+    else:
+        revision_ids = [str(from_revision_id), str(to_revision_id)]
+
+    records = await gateway.request(
+        "GET",
+        "content_revisions",
+        params={
+            "select": "id,workspace_id,content_id,revision_number,content_text",
+            "workspace_id": f"eq.{workspace_id}",
+            "content_id": f"eq.{content_id}",
+            "id": f"in.({','.join(revision_ids)})",
+            "limit": "2",
+        },
+    )
+
+    by_id = {str(record["id"]): record for record in records}
+    from_revision = by_id.get(str(from_revision_id))
+    to_revision = by_id.get(str(to_revision_id))
+
+    if from_revision is None or to_revision is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or both revisions were not found for this content submission.",
+        )
+
+    return build_revision_diff(
+        content_id=content_id,
+        from_revision=from_revision,
+        to_revision=to_revision,
+    )

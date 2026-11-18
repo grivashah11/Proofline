@@ -365,6 +365,10 @@ def test_analysis_persists_claim_needing_verification(
     assert finding["outcome"] == "needs_verification"
     assert finding["candidate_claim"]["subject"] == "Test product"
     assert finding["revision_id"] == str(gateway.revision_id)
+    assert 0.0 <= finding["match_confidence"] <= 1.0
+    assert finding["match_confidence_band"] in {"high", "moderate", "low"}
+    assert finding["match_confidence_factors"]
+    assert finding["normalized_claim"]["subject"] == "test product"
 
 
 def test_analysis_reuses_persisted_ai_extraction_for_same_revision(

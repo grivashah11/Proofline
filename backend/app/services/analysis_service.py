@@ -97,6 +97,16 @@ def build_analysis_findings(
                 "evidence_source_url": assessment.evidence_source_url,
                 "evidence_reference": assessment.evidence_reference,
                 "evidence_excerpt": assessment.evidence_excerpt,
+                "match_confidence": assessment.confidence_score,
+                "match_confidence_band": assessment.confidence_band.value,
+                "match_confidence_factors": [
+                    factor.model_dump(mode="json")
+                    for factor in assessment.confidence_factors
+                ],
+                "normalized_claim": (
+                    assessment.normalized_claim.model_dump(mode="json")
+                    if assessment.normalized_claim else None
+                ),
             }
         )
 

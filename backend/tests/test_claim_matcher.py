@@ -11,6 +11,7 @@ WORKSPACE_ID = str(uuid4())
 def make_claim(
     *,
     text="The HydraLite Bottle keeps beverages cold for up to 24 hours.",
+    product_scope="HydraLite Bottle",
     numeric_value="24",
     unit="hours",
     qualifier="up to",
@@ -29,7 +30,7 @@ def make_claim(
         unit=unit,
         qualifier=qualifier,
         conditions=conditions,
-        product_scope="HydraLite Bottle",
+        product_scope=product_scope,
         channel_scope=None,
         market_scope=None,
         extraction_note="Candidate claim extracted from draft text.",
@@ -238,7 +239,7 @@ def test_emoji_offsets_use_utf16_indices():
     assert assessment.start_index == 3
 
 
-def test_unit_mismatch_requires_verification():
+def test_supported_time_unit_conversion_detects_numeric_conflict():
     content = "The HydraLite Bottle keeps beverages cold for up to 24 days."
 
     claim = make_claim(
@@ -255,7 +256,7 @@ def test_unit_mismatch_requires_verification():
         version,
     )
 
-    assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+    assert assessment.status == PassportMatchStatus.CONFLICT
 
 
 def test_wrong_channel_scope_requires_verification():
@@ -331,6 +332,7 @@ def test_subject_matching_ignores_trailing_model_year_when_scope_agrees():
         value_text="18 hours",
         unit="hours",
         qualifier="up to",
+        product_scope="13-inch MacBook Air with M4 chip (2025)",
     )
     passport, version = make_records(
         subject="13-inch MacBook Air with the M4 chip",
@@ -477,6 +479,7 @@ def test_m4_30_hour_claim_conflicts_after_model_year_normalization():
         value_text="30 hours",
         unit="hours",
         qualifier="up to",
+        product_scope="13-inch MacBook Air with M4 chip (2025)",
     )
     passport, version = make_records(
         subject="13-inch MacBook Air with the M4 chip",
@@ -538,3 +541,72 @@ def test_mismatched_claim_kind_stays_needs_verification():
     assessment = run_match(content, claim, passport, version)
 
     assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+
+
+def test_normalized_claim_uses_canonical_units_and_retains_model_year():
+    content = (
+        "The 13-inch MacBook Air with the M4 chip (2025) offers up to 24 hr."
+    )
+    claim = make_claim(
+        text=content,
+        subject="13-inch MacBook Air with the M4 chip (2025)",
+        attribute="Battery life",
+        numeric_value="24",
+        value_text="24 hr",
+        unit="hr",
+        qualifier="up to",
+        product_scope="13-inch MacBook Air with M4 chip (2025)",
+    )
+    passport, version = make_records(
+        subject="13-inch MacBook Air with the M4 chip",
+        attribute="Battery life",
+        numeric_value="24",
+        product_scope="13-inch MacBook Air with M4 chip (2025)",
+    )
+    version["unit"] = "hours"
+    version["qualifier"] = "up to"
+
+    assessment = run_match(content, claim, passport, version)
+
+    assert assessment.status == PassportMatchStatus.SUPPORTED
+    assert assessment.normalized_claim.unit == "second"
+    assert assessment.normalized_claim.unit_dimension == "time"
+    assert assessment.normalized_claim.numeric_value == "86400"
+    assert assessment.normalized_claim.model_years == ["2025"]
+
+
+def test_normalized_claim_extracts_single_numeric_value_from_value_text():
+    content = "The HydraLite Bottle keeps beverages cold for up to 24 hours."
+    claim = make_claim(
+        text=content,
+        numeric_value=None,
+        value_text="up to 24 hours",
+        unit="hours",
+    )
+
+    passport, version = make_records()
+    version["unit"] = "hours"
+    version["qualifier"] = "up to"
+
+    assessment = run_match(content, claim, passport, version)
+
+    assert assessment.normalized_claim.numeric_value == "86400"
+    assert assessment.normalized_claim.unit == "second"
+
+
+def test_missing_material_qualifier_caps_comparison_confidence():
+    content = "The HydraLite Bottle keeps beverages cold for up to 24 hours."
+    claim = make_claim(text=content, qualifier=None)
+    passport, version = make_records()
+    version["qualifier"] = "up to"
+
+    assessment = run_match(content, claim, passport, version)
+
+    assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+    assert assessment.confidence_score <= 0.79
+    qualifier_factor = next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "qualifier"
+    )
+    assert qualifier_factor.applicable is True
+    assert qualifier_factor.matched is False

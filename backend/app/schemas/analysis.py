@@ -74,6 +74,12 @@ class AnalysisFindingRecord(BaseModel):
     evidence_reference: str | None = None
     evidence_excerpt: str | None = None
 
+    match_confidence: float | None = Field(default=None, ge=0, le=1)
+    match_confidence_band: str | None = None
+    match_confidence_factors: list[dict] | None = None
+    normalized_claim: dict | None = None
+
+    finding_fingerprint: str | None = None
     created_at: datetime
 
 

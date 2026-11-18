@@ -69,6 +69,7 @@ class ReviewDecisionRecord(BaseModel):
     decision: ReviewDecision
     reviewer_comment: str | None = None
     reviewer_id: UUID
+    review_context: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 

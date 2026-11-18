@@ -7,10 +7,15 @@ from app.core.auth import AuthContext
 from app.core.config import Settings
 
 BRAND_IMAGE_BUCKET = "proofline-workspace-images"
+SOURCE_DOCUMENT_BUCKET = "proofline-source-documents"
+ALLOWED_STORAGE_BUCKETS = {
+    BRAND_IMAGE_BUCKET,
+    SOURCE_DOCUMENT_BUCKET,
+}
 
 
 class SupabaseStorageGateway:
-    """User-scoped Supabase Storage access; never uses a service-role key."""
+    """User-scoped access to approved private Supabase Storage buckets."""
 
     def __init__(
         self,
@@ -35,19 +40,35 @@ class SupabaseStorageGateway:
             "Authorization": f"Bearer {self.access_token}",
         }
 
-    def _object_url(self, path: str, *, authenticated_download: bool = False) -> str:
+    @staticmethod
+    def _validate_bucket(bucket: str) -> str:
+        if bucket not in ALLOWED_STORAGE_BUCKETS:
+            raise ValueError("Storage bucket is not permitted by this application.")
+        return bucket
+
+    def _object_url(
+        self,
+        path: str,
+        *,
+        bucket: str = BRAND_IMAGE_BUCKET,
+        authenticated_download: bool = False,
+    ) -> str:
+        bucket = self._validate_bucket(bucket)
         encoded_path = quote(path, safe="/")
-        if authenticated_download:
-            endpoint = "authenticated"
-        else:
-            endpoint = ""
-        suffix = f"/{endpoint}" if endpoint else ""
+        endpoint = "/authenticated" if authenticated_download else ""
         return (
-            f"{self.base_url}/storage/v1/object{suffix}/"
-            f"{quote(BRAND_IMAGE_BUCKET, safe='')}/{encoded_path}"
+            f"{self.base_url}/storage/v1/object{endpoint}/"
+            f"{quote(bucket, safe='')}/{encoded_path}"
         )
 
-    async def upload(self, path: str, content: bytes, mime_type: str) -> None:
+    async def upload(
+        self,
+        path: str,
+        content: bytes,
+        mime_type: str,
+        *,
+        bucket: str = BRAND_IMAGE_BUCKET,
+    ) -> None:
         headers = self._headers()
         headers.update(
             {
@@ -59,7 +80,7 @@ class SupabaseStorageGateway:
 
         try:
             response = await self.client.post(
-                self._object_url(path),
+                self._object_url(path, bucket=bucket),
                 content=content,
                 headers=headers,
             )
@@ -76,10 +97,19 @@ class SupabaseStorageGateway:
 
         self._raise_storage_error(response, operation="upload")
 
-    async def download(self, path: str) -> bytes:
+    async def download(
+        self,
+        path: str,
+        *,
+        bucket: str = BRAND_IMAGE_BUCKET,
+    ) -> bytes:
         try:
             response = await self.client.get(
-                self._object_url(path, authenticated_download=True),
+                self._object_url(
+                    path,
+                    bucket=bucket,
+                    authenticated_download=True,
+                ),
                 headers=self._headers(),
             )
         except httpx.TimeoutException:
@@ -96,11 +126,17 @@ class SupabaseStorageGateway:
         self._raise_storage_error(response, operation="download")
         return response.content
 
-    async def remove(self, path: str) -> None:
-        """Best-effort rollback for an upload whose database insert failed."""
+    async def remove(
+        self,
+        path: str,
+        *,
+        bucket: str = BRAND_IMAGE_BUCKET,
+    ) -> None:
+        """Best-effort rollback for an object whose database insert failed."""
+        bucket = self._validate_bucket(bucket)
         url = (
             f"{self.base_url}/storage/v1/object/"
-            f"{quote(BRAND_IMAGE_BUCKET, safe='')}"
+            f"{quote(bucket, safe='')}"
         )
         try:
             response = await self.client.request(
@@ -134,7 +170,7 @@ class SupabaseStorageGateway:
         if response.status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Stored image was not found.",
+                detail="The stored file was not found.",
             )
         if response.status_code == 409:
             raise HTTPException(
@@ -144,7 +180,7 @@ class SupabaseStorageGateway:
         if response.status_code == 413:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail="The image exceeds the storage upload limit.",
+                detail="The file exceeds the storage upload limit.",
             )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

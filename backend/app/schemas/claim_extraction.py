@@ -91,6 +91,41 @@ class PassportMatchStatus(str, Enum):
     NEEDS_VERIFICATION = "needs_verification"
 
 
+class MatchConfidenceBand(str, Enum):
+    HIGH = "high"
+    MODERATE = "moderate"
+    LOW = "low"
+
+
+class MatchConfidenceFactor(BaseModel):
+    """Deterministic, inspectable contribution to the matcher confidence score."""
+
+    name: str = Field(min_length=1, max_length=60)
+    label: str = Field(min_length=1, max_length=120)
+    weight: float = Field(ge=0, le=1)
+    applicable: bool = True
+    matched: bool | None = None
+    explanation: str = Field(min_length=1, max_length=500)
+
+
+class NormalizedClaimFields(BaseModel):
+    """Canonical comparison fields; these are not a replacement for source text."""
+
+    subject: str
+    attribute: str
+    claim_kind: ClaimKind
+    value_text: str | None = None
+    numeric_value: str | None = None
+    unit: str | None = None
+    unit_dimension: str | None = None
+    model_years: list[str] = Field(default_factory=list)
+    qualifier: str | None = None
+    conditions: str | None = None
+    product_scope: str | None = None
+    channel_scope: str | None = None
+    market_scope: str | None = None
+
+
 class ClaimAssessment(BaseModel):
     candidate: ExtractedClaim
 
@@ -110,6 +145,11 @@ class ClaimAssessment(BaseModel):
     evidence_source_url: str | None = None
     evidence_reference: str | None = None
     evidence_excerpt: str | None = None
+
+    confidence_score: float = Field(default=0.0, ge=0, le=1)
+    confidence_band: MatchConfidenceBand = MatchConfidenceBand.LOW
+    confidence_factors: list[MatchConfidenceFactor] = Field(default_factory=list)
+    normalized_claim: NormalizedClaimFields | None = None
 
     explanation: str
     recommended_action: str
