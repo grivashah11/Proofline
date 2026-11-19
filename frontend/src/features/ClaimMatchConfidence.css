@@ -1,0 +1,222 @@
+.match-confidence-panel {
+  margin-top: 11px;
+  padding: 11px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 9px;
+  background: rgba(139, 92, 246, 0.045);
+}
+
+.match-confidence-heading,
+.match-confidence-score-row,
+.match-factor-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.match-confidence-eyebrow {
+  color: #a995d0;
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: 0.8px;
+}
+
+.match-confidence-heading h4 {
+  margin: 3px 0 0;
+  color: #e8def7;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.match-confidence-band {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 999px;
+  color: #c9b4ff;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.match-confidence-band--high {
+  border-color: rgba(74, 222, 163, 0.22);
+  color: #91e0bd;
+}
+
+.match-confidence-band--moderate {
+  border-color: rgba(245, 198, 106, 0.22);
+  color: #e7ca91;
+}
+
+.match-confidence-band--low {
+  border-color: rgba(251, 130, 158, 0.22);
+  color: #f0a5b6;
+}
+
+.match-confidence-score-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.match-confidence-score-row > strong {
+  color: #f1eaff;
+  font-size: 17px;
+  letter-spacing: -0.4px;
+}
+
+.match-confidence-score-row > span {
+  color: #a99bb8;
+  font-size: 8px;
+}
+
+.match-confidence-track {
+  flex: 1 1 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.match-confidence-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #b69cff);
+}
+
+.normalized-claim-block {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(190, 160, 232, 0.12);
+}
+
+.normalized-claim-block h5 {
+  margin: 0 0 7px;
+  color: #b9a8d1;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+}
+
+.normalized-claim-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.normalized-claim-grid > div {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(190, 160, 232, 0.1);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.normalized-claim-grid dt {
+  margin: 0 0 3px;
+  color: #8f819e;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.normalized-claim-grid dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #d7cce5;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.match-confidence-factors {
+  margin-top: 9px;
+  border-top: 1px solid rgba(190, 160, 232, 0.12);
+  padding-top: 8px;
+}
+
+.match-confidence-factors summary {
+  color: #c4b1e2;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.match-factor-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.match-factor-item {
+  padding: 8px;
+  border: 1px solid rgba(190, 160, 232, 0.1);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.match-factor-topline strong {
+  color: #e1d6ef;
+  font-size: 8px;
+}
+
+.match-factor-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  font-size: 7px;
+  font-weight: 700;
+}
+
+.match-factor-status--matched { color: #90dfbb; }
+.match-factor-status--different { color: #efa5b4; }
+.match-factor-status--neutral { color: #aa9bb9; }
+
+.match-factor-item p {
+  margin: 5px 0;
+  color: #b4a7c3;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.match-factor-item small {
+  color: #887b96;
+  font-size: 7px;
+}
+
+.match-confidence-missing {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 9px;
+  color: #d8bf8b;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.match-confidence-missing svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.match-confidence-disclaimer {
+  margin: 9px 0 0;
+  color: #91859f;
+  font-size: 7px;
+  line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+  .normalized-claim-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .match-confidence-heading {
+    align-items: flex-start;
+  }
+}

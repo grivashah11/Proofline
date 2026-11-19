@@ -22,6 +22,12 @@ import {
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { ApiError, apiRequest } from '../lib/api'
+import {
+  PassportReverificationPanel,
+  SourceDocumentEvidencePicker,
+  PassportSourceLinks,
+  type SourceEvidenceSelection,
+} from './ClaimPassportEvidenceTools'
 import type { WorkspaceRole } from '../lib/workspaces'
 import './ClaimPassports.css'
 
@@ -66,6 +72,8 @@ type PassportVersionRecord = {
   evidence_reference: string | null
   evidence_excerpt: string | null
   evidence_source_version: string | null
+  source_document_id?: string | null
+  source_document_segment_id?: string | null
   owner_id: string
   verified_by: string | null
   verified_at: string | null
@@ -102,6 +110,9 @@ type VersionDraft = {
   evidence_reference: string
   evidence_excerpt: string
   evidence_source_version: string
+  source_document_id: string
+  source_document_segment_id: string
+  source_excerpt: string
   review_by: string
 }
 
@@ -136,6 +147,9 @@ const initialVersionDraft = (): VersionDraft => ({
   evidence_reference: '',
   evidence_excerpt: '',
   evidence_source_version: '',
+  source_document_id: '',
+  source_document_segment_id: '',
+  source_excerpt: '',
   review_by: '',
 })
 
@@ -470,6 +484,19 @@ export default function ClaimPassportsPage({
       return
     }
 
+    const sourceLinkFields = [
+      versionDraft.source_document_id,
+      versionDraft.source_document_segment_id,
+      versionDraft.source_excerpt,
+    ]
+    const hasAnySourceLinkField = sourceLinkFields.some((value) => value.trim())
+    const hasAllSourceLinkFields = sourceLinkFields.every((value) => value.trim())
+    if (hasAnySourceLinkField && !hasAllSourceLinkFields) {
+      setModalError('The uploaded document, extracted passage and exact source excerpt must all be selected together. Re-select the passage or remove the uploaded document link.')
+      setVersionStep(3)
+      return
+    }
+
     setSaving(true)
 
     const optional = (value: string) => value.trim() || null
@@ -493,6 +520,9 @@ export default function ClaimPassportsPage({
       evidence_reference: optional(versionDraft.evidence_reference),
       evidence_excerpt: optional(versionDraft.evidence_excerpt),
       evidence_source_version: optional(versionDraft.evidence_source_version),
+      source_document_id: optional(versionDraft.source_document_id),
+      source_document_segment_id: optional(versionDraft.source_document_segment_id),
+      source_excerpt: optional(versionDraft.source_excerpt),
       review_by: optional(versionDraft.review_by),
     }
 
@@ -513,6 +543,37 @@ export default function ClaimPassportsPage({
     } finally {
       setSaving(false)
     }
+  }
+
+  function selectUploadedEvidence(selection: SourceEvidenceSelection | null) {
+    if (!selection) {
+      setVersionDraft((current) => ({
+        ...current,
+        source_document_id: '',
+        source_document_segment_id: '',
+        source_excerpt: '',
+        evidence_source_title: '',
+        evidence_source_url: '',
+        evidence_reference: '',
+        evidence_excerpt: '',
+        evidence_source_version: '',
+      }))
+      setModalError('')
+      return
+    }
+
+    setVersionDraft((current) => ({
+      ...current,
+      source_document_id: selection.source_document_id,
+      source_document_segment_id: selection.source_document_segment_id,
+      source_excerpt: selection.source_excerpt,
+      evidence_source_title: selection.evidence_source_title,
+      evidence_reference: selection.evidence_reference,
+      evidence_source_version: selection.evidence_source_version,
+      evidence_source_url: '',
+      evidence_excerpt: selection.source_excerpt,
+    }))
+    setModalError('')
   }
 
   async function activateVersion(version: PassportVersionRecord) {
@@ -625,6 +686,17 @@ export default function ClaimPassportsPage({
         <StatCard icon={CheckCircle2} label="Active Passports" value={activeCount} tone="green" />
         <StatCard icon={Clock3} label="Draft / Review due" value={draftCount + reviewDueCount} tone="amber" />
       </section>
+
+      {canEdit && (
+        <PassportReverificationPanel
+          workspaceId={workspaceId}
+          refreshKey={refreshKey}
+          onOpenPassport={(passportId) => {
+            const passport = passports.find((item) => item.id === passportId)
+            if (passport) void openPassport(passport)
+          }}
+        />
+      )}
 
       <section className="cp-library-panel">
         <div className="cp-library-heading">
@@ -1000,6 +1072,12 @@ export default function ClaimPassportsPage({
                       )}
                     </div>
 
+                    <PassportSourceLinks
+                      workspaceId={workspaceId}
+                      passportId={selectedPassport.id}
+                      versionId={version.id}
+                    />
+
                     <div className="cp-version-dates">
                       <span>
                         <CalendarDays size={13} />
@@ -1373,6 +1451,20 @@ export default function ClaimPassportsPage({
                       <p>Add an inspectable source and paste the exact excerpt that supports the approved wording. A Passport version remains a draft until its evidence is verified and activated.</p>
                     </div>
 
+                    <SourceDocumentEvidencePicker
+                      workspaceId={workspaceId}
+                      selectedSourceDocumentId={versionDraft.source_document_id || null}
+                      selectedSegmentId={versionDraft.source_document_segment_id || null}
+                      onSelectEvidence={selectUploadedEvidence}
+                    />
+
+                    {versionDraft.source_document_id && (
+                      <div className="cp-wizard-callout">
+                        <CheckCircle2 size={16} />
+                        <p>Uploaded document evidence is selected. Keep the excerpt below as an exact, continuous passage from the extracted source; the backend checks it before creating the draft version.</p>
+                      </div>
+                    )}
+
                     <label>
                       Evidence source title *
                       <input value={versionDraft.evidence_source_title} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_source_title: event.target.value })} placeholder="e.g. Official product technical specifications" maxLength={500} required />
@@ -1384,8 +1476,8 @@ export default function ClaimPassportsPage({
                     </label>
                     <label>
                       Exact supporting excerpt *
-                      <textarea rows={3} value={versionDraft.evidence_excerpt} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_excerpt: event.target.value })} placeholder="Paste the exact passage, table value or sentence that supports the approved wording..." maxLength={10000} required />
-                      <small>Keep the excerpt faithful to the source. Do not rewrite it as marketing copy.</small>
+                      <textarea rows={3} value={versionDraft.evidence_excerpt} onChange={(event) => setVersionDraft({ ...versionDraft, evidence_excerpt: event.target.value, source_excerpt: versionDraft.source_document_id ? event.target.value : versionDraft.source_excerpt })} placeholder="Paste the exact passage, table value or sentence that supports the approved wording..." maxLength={10000} required />
+                      <small>{versionDraft.source_document_id ? "For uploaded documents, this must remain an exact continuous substring of the selected passage. Shorten it if needed, but do not paraphrase." : "Keep the excerpt faithful to the source. Do not rewrite it as marketing copy."}</small>
                     </label>
                     <div className="cp-form-grid">
                       <label>

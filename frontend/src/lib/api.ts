@@ -29,12 +29,13 @@ function getErrorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export async function apiRequest<T>(
+async function authenticatedFetch(
   path: string,
-  options: RequestInit = {},
-): Promise<T> {
+  options: RequestInit,
+  accept: string,
+): Promise<Response> {
   const headers = new Headers(options.headers)
-  headers.set('Accept', 'application/json')
+  headers.set('Accept', accept)
 
   // Let the browser set the multipart boundary for FormData uploads.
   if (
@@ -61,10 +62,8 @@ export async function apiRequest<T>(
 
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
 
-  let response: Response
-
   try {
-    response = await fetch(`${API_BASE_URL}${normalizedPath}`, {
+    return await fetch(`${API_BASE_URL}${normalizedPath}`, {
       ...options,
       headers,
     })
@@ -73,6 +72,32 @@ export async function apiRequest<T>(
       'Could not reach the Proofline backend. Check that the API server is running.',
     )
   }
+}
+
+async function readErrorResponse(
+  response: Response,
+  fallback: string,
+): Promise<ApiError> {
+  const contentType = response.headers.get('content-type') ?? ''
+  const payload: unknown = contentType.includes('application/json')
+    ? await response.json()
+    : await response.text()
+
+  return new ApiError(
+    getErrorMessage(payload, `${fallback} (${response.status}).`),
+    response.status,
+  )
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await authenticatedFetch(
+    path,
+    options,
+    'application/json',
+  )
 
   if (response.status === 204) {
     return undefined as T
@@ -97,45 +122,24 @@ export async function apiRequest<T>(
 }
 
 export async function apiRequestBlob(path: string): Promise<Blob> {
-  const headers = new Headers({ Accept: 'image/*' })
-
-  if (supabase) {
-    const { data, error } = await supabase.auth.getSession()
-
-    if (error) {
-      throw new Error(`Unable to read sign-in session: ${error.message}`)
-    }
-
-    const accessToken = data.session?.access_token
-    if (accessToken) {
-      headers.set('Authorization', `Bearer ${accessToken}`)
-    }
-  }
-
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  let response: Response
-
-  try {
-    response = await fetch(`${API_BASE_URL}${normalizedPath}`, { headers })
-  } catch {
-    throw new Error(
-      'Could not reach the Proofline backend. Check that the API server is running.',
-    )
-  }
+  const response = await authenticatedFetch(path, {}, 'image/*')
 
   if (!response.ok) {
-    const contentType = response.headers.get('content-type') ?? ''
-    const payload: unknown = contentType.includes('application/json')
-      ? await response.json()
-      : await response.text()
+    throw await readErrorResponse(response, 'The image request failed')
+  }
 
-    throw new ApiError(
-      getErrorMessage(
-        payload,
-        `The image request failed with status ${response.status}.`,
-      ),
-      response.status,
-    )
+  return response.blob()
+}
+
+export async function apiRequestFile(path: string): Promise<Blob> {
+  const response = await authenticatedFetch(
+    path,
+    {},
+    'application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/octet-stream',
+  )
+
+  if (!response.ok) {
+    throw await readErrorResponse(response, 'The document request failed')
   }
 
   return response.blob()

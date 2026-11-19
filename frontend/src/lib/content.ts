@@ -53,6 +53,31 @@ export type ExtractedClaim = {
   extraction_note: string
 }
 
+export type MatchConfidenceFactor = {
+  name: string
+  label: string
+  weight: number
+  applicable: boolean
+  matched: boolean | null
+  explanation: string
+}
+
+export type NormalizedClaim = {
+  subject: string
+  attribute: string
+  claim_kind: 'factual' | 'promotional'
+  value_text: string | null
+  numeric_value: string | null
+  unit: string | null
+  unit_dimension: string | null
+  model_years: string[]
+  qualifier: string | null
+  conditions: string | null
+  product_scope: string | null
+  channel_scope: string | null
+  market_scope: string | null
+}
+
 export type AnalysisFinding = {
   id: string
   workspace_id: string
@@ -80,6 +105,12 @@ export type AnalysisFinding = {
   evidence_source_url: string | null
   evidence_reference: string | null
   evidence_excerpt: string | null
+  // Null is expected for historical findings created before Improvement 2.
+  match_confidence?: number | null
+  match_confidence_band?: 'high' | 'moderate' | 'low' | null
+  match_confidence_factors?: MatchConfidenceFactor[] | null
+  normalized_claim?: NormalizedClaim | null
+  finding_fingerprint?: string | null
   created_at: string
 }
 
@@ -136,6 +167,9 @@ export type ReviewDecisionRecord = {
   decision: ReviewDecision
   reviewer_comment: string | null
   reviewer_id: string
+  // The backend captures the exact revision, analysis summary and finding snapshot
+  // used by the reviewer when the decision was recorded.
+  review_context?: Record<string, unknown>
   created_at: string
 }
 

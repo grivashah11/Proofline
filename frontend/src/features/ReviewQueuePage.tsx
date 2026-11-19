@@ -37,8 +37,17 @@ import {
   type ReviewDecision,
   type ReviewDecisionRecord,
 } from '../lib/content'
+import {
+  getFindingLifecycle,
+  getRevisionDiff,
+  type FindingLifecycleRecord,
+  type RevisionDiffResponse,
+} from '../lib/governance'
 import type { WorkspaceRole } from '../lib/workspaces'
 import { useAuth } from '../lib/auth-context'
+import ClaimMatchConfidence from './ClaimMatchConfidence'
+import GovernanceInsightsPanel from './GovernanceInsightsPanel'
+import { FindingLifecyclePanel, RevisionDiffPanel, ReviewDecisionContext } from './ReviewGovernancePanels'
 import './WorkflowPages.css'
 
 type Props = { workspaceId: string; role: WorkspaceRole }
@@ -55,6 +64,7 @@ function getErrorMessage(error: unknown) {
 
 export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const { user } = useAuth()
+  const [activeView, setActiveView] = useState<'queue' | 'insights'>('queue')
   const [queue, setQueue] = useState<ContentRecord[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [detail, setDetail] = useState<ContentDetail | null>(null)
@@ -62,6 +72,14 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const [comments, setComments] = useState<ContentComment[]>([])
   const [decisions, setDecisions] = useState<ReviewDecisionRecord[]>([])
   const [events, setEvents] = useState<AuditEvent[]>([])
+  const [lifecycleRecords, setLifecycleRecords] = useState<FindingLifecycleRecord[]>([])
+  const [lifecycleLoadedFor, setLifecycleLoadedFor] = useState('')
+  const [lifecycleError, setLifecycleError] = useState('')
+  const [diffFromRevisionId, setDiffFromRevisionId] = useState('')
+  const [diffToRevisionId, setDiffToRevisionId] = useState('')
+  const [revisionDiff, setRevisionDiff] = useState<RevisionDiffResponse | null>(null)
+  const [diffLoadedFor, setDiffLoadedFor] = useState('')
+  const [diffError, setDiffError] = useState('')
   const [reviewComment, setReviewComment] = useState('')
   const [threadComment, setThreadComment] = useState('')
   const [loadedWorkspaceId, setLoadedWorkspaceId] = useState('')
@@ -70,6 +88,10 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const [loadedDetailKey, setLoadedDetailKey] = useState('')
   const detailKey = `${workspaceId}:${selectedId}:${detailReloadKey}`
   const detailLoading = Boolean(selectedId) && loadedDetailKey !== detailKey
+  const lifecycleKey = `${workspaceId}:${selectedId}`
+  const lifecycleLoading = Boolean(selectedId) && lifecycleLoadedFor !== lifecycleKey
+  const diffKey = `${workspaceId}:${selectedId}:${diffFromRevisionId}:${diffToRevisionId}`
+  const diffLoading = Boolean(diffFromRevisionId && diffToRevisionId && diffFromRevisionId !== diffToRevisionId) && diffLoadedFor !== diffKey
   const [busy, setBusy] = useState<'comment' | ReviewDecision | ''>('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -142,9 +164,17 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
         setDetail(loadedDetail)
         setDecisions(reviewRecords)
         setEvents(auditRecords)
-        const revision = loadedDetail.revisions.find((item) => item.id === loadedDetail.content.current_revision_id)
-          ?? loadedDetail.revisions[0]
+        const orderedRevisions = [...loadedDetail.revisions].sort(
+          (a, b) => a.revision_number - b.revision_number,
+        )
+        const revision = orderedRevisions.find((item) => item.id === loadedDetail.content.current_revision_id)
+          ?? orderedRevisions[orderedRevisions.length - 1]
           ?? null
+        const previousRevision = orderedRevisions.length > 1
+          ? orderedRevisions[orderedRevisions.length - 2]
+          : null
+        setDiffFromRevisionId(previousRevision?.id ?? '')
+        setDiffToRevisionId(revision?.id ?? '')
         const latestRun = runs
           .filter((run) => run.revision_id === revision?.id)
           .sort((a, b) => b.run_number - a.run_number)[0]
@@ -178,6 +208,44 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
     void loadSelected()
     return () => { active = false }
   }, [workspaceId, selectedId, loading, detailReloadKey, detailKey])
+
+  useEffect(() => {
+    if (loading || !selectedId) return
+    let active = true
+    getFindingLifecycle(workspaceId, selectedId)
+      .then((records) => {
+        if (!active) return
+        setLifecycleRecords(records)
+        setLifecycleError('')
+        setLifecycleLoadedFor(lifecycleKey)
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        setLifecycleRecords([])
+        setLifecycleError(getErrorMessage(err))
+        setLifecycleLoadedFor(lifecycleKey)
+      })
+    return () => { active = false }
+  }, [workspaceId, selectedId, loading, detailReloadKey, lifecycleKey])
+
+  useEffect(() => {
+    if (loading || detailLoading || !detail || detail.content.id !== selectedId || !diffFromRevisionId || !diffToRevisionId || diffFromRevisionId === diffToRevisionId) return
+    let active = true
+    getRevisionDiff(workspaceId, selectedId, diffFromRevisionId, diffToRevisionId)
+      .then((result) => {
+        if (!active) return
+        setRevisionDiff(result)
+        setDiffError('')
+        setDiffLoadedFor(diffKey)
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        setRevisionDiff(null)
+        setDiffError(getErrorMessage(err))
+        setDiffLoadedFor(diffKey)
+      })
+    return () => { active = false }
+  }, [workspaceId, selectedId, loading, detailLoading, detail, detailReloadKey, diffFromRevisionId, diffToRevisionId, diffKey])
 
   async function handleThreadComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -218,6 +286,10 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
         setComments([])
         setDecisions([])
         setEvents([])
+        setLifecycleRecords([])
+        setRevisionDiff(null)
+        setDiffFromRevisionId('')
+        setDiffToRevisionId('')
       }
     } catch (err) {
       setError(getErrorMessage(err))
@@ -235,6 +307,24 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
     )
   }
 
+  if (activeView === 'insights') {
+    return (
+      <div className="workflow-page">
+        <header className="workflow-header">
+          <div>
+            <p className="eyebrow">BRAND OWNER WORKSPACE</p>
+            <h1>Governance insights</h1>
+            <p className="workflow-subtitle">Spot repeated issues, review finding resolution and identify where brand guidance or evidence may need attention.</p>
+          </div>
+          <button className="button button-secondary" type="button" onClick={() => setActiveView('queue')}>
+            Back to review queue
+          </button>
+        </header>
+        <GovernanceInsightsPanel workspaceId={workspaceId} />
+      </div>
+    )
+  }
+
   const hasCurrentAnalysis = Boolean(analysis && currentRevision && analysis.analysis.revision_id === currentRevision.id)
   const decisionDisabled = !detail || detail.content.status !== 'in_review' || !hasCurrentAnalysis || busy !== ''
 
@@ -242,7 +332,10 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
     <div className="workflow-page">
       <header className="workflow-header">
         <div><p className="eyebrow">BRAND OWNER WORKSPACE</p><h1>Review queue</h1><p className="workflow-subtitle">Inspect the saved revision, read its evidence-linked findings and record an accountable human decision.</p></div>
-        <button className="button button-secondary" type="button" onClick={() => void refreshQueue()}><RefreshCw size={15} /> Refresh queue</button>
+        <div className="review-queue-header-actions">
+          <button className="button button-secondary" type="button" onClick={() => setActiveView('insights')}><History size={15} /> Governance insights</button>
+          <button className="button button-secondary" type="button" onClick={() => void refreshQueue()}><RefreshCw size={15} /> Refresh queue</button>
+        </div>
       </header>
 
       {error && <div className="workflow-alert workflow-alert--error" role="alert"><AlertCircle size={17} />{error}</div>}
@@ -278,13 +371,30 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
                 {currentRevision && <div className="workflow-editor-footer"><span>Revision ID: {currentRevision.id}</span><span>Submitted by {detail.content.created_by === user?.id ? 'you' : detail.content.created_by.slice(0, 8)}</span></div>}
               </section>
 
+              <RevisionDiffPanel
+                revisions={detail.revisions}
+                fromRevisionId={diffFromRevisionId}
+                toRevisionId={diffToRevisionId}
+                onFromRevisionChange={setDiffFromRevisionId}
+                onToRevisionChange={setDiffToRevisionId}
+                diff={revisionDiff}
+                loading={diffLoading}
+                error={diffError}
+              />
+
+              <FindingLifecyclePanel
+                records={lifecycleRecords}
+                loading={lifecycleLoading}
+                error={lifecycleError}
+              />
+
               <section className="workflow-section-block">
                 <div className="workflow-section-heading"><div><p className="eyebrow">EVIDENCE-LINKED ANALYSIS</p><h3>Findings to consider</h3></div>{analysis && <span className="analysis-state analysis-state--good">Run {analysis.analysis.run_number}</span>}</div>
                 {!analysis || !hasCurrentAnalysis ? <div className="workflow-notice workflow-notice--warning"><CircleAlert size={17} />No analysis matching this exact revision was returned. Do not make a decision until the Creator re-runs the checks and resubmits.</div> : (
                   <>
                     <div className="analysis-summary-grid"><div><strong>{analysis.findings.length}</strong><span>Total findings</span></div><div><strong>{analysis.analysis.rule_conflict_count + analysis.analysis.claim_conflict_count}</strong><span>Conflicts</span></div><div><strong>{analysis.analysis.claim_supported_count}</strong><span>Supported claims</span></div><div><strong>{analysis.analysis.claim_needs_verification_count + analysis.analysis.claim_review_due_count}</strong><span>Need verification</span></div></div>
                     {analysis.analysis.ai_extraction_status === 'unavailable' && <div className="workflow-notice workflow-notice--warning"><CircleAlert size={16} />AI claim extraction was unavailable. Treat the analysis as partial and inspect claims manually.</div>}
-                    {analysis.findings.length === 0 ? <div className="workflow-inline-empty"><CheckCircle2 size={18} /><div><strong>No findings returned</strong><p>This does not replace your own review of the submitted content.</p></div></div> : <div className="finding-list">{analysis.findings.map((finding) => <article className={`finding-card finding-${finding.outcome}`} key={finding.id}><div className="finding-card-top"><div className="finding-title-wrap"><span className={`finding-severity severity-${finding.severity}`}>{finding.severity}</span><strong>{finding.title}</strong></div><span className={`outcome-pill outcome-${finding.outcome}`}>{finding.outcome.replaceAll('_', ' ')}</span></div><p className="finding-message">{finding.message}</p>{finding.matched_text && <blockquote className="finding-excerpt">“{finding.matched_text}”</blockquote>}{finding.approved_wording && <div className="approved-wording"><span>Approved wording</span><p>{finding.approved_wording}</p></div>}{(finding.evidence_source_title || finding.evidence_excerpt) && <div className="evidence-box"><div className="evidence-box-heading"><BadgeCheck size={15} /><strong>{finding.evidence_source_title || 'Claim Passport evidence'}</strong></div>{finding.evidence_excerpt && <p>“{finding.evidence_excerpt}”</p>}{finding.evidence_reference && <small>Reference: {finding.evidence_reference}</small>}{finding.evidence_source_url && <a href={finding.evidence_source_url} target="_blank" rel="noreferrer">Open evidence source <Send size={12} /></a>}</div>}<div className="finding-action"><span>Suggested next step</span><p>{finding.recommended_action}</p></div></article>)}</div>}
+                    {analysis.findings.length === 0 ? <div className="workflow-inline-empty"><CheckCircle2 size={18} /><div><strong>No findings returned</strong><p>This does not replace your own review of the submitted content.</p></div></div> : <div className="finding-list">{analysis.findings.map((finding) => <article className={`finding-card finding-${finding.outcome}`} key={finding.id}><div className="finding-card-top"><div className="finding-title-wrap"><span className={`finding-severity severity-${finding.severity}`}>{finding.severity}</span><strong>{finding.title}</strong></div><span className={`outcome-pill outcome-${finding.outcome}`}>{finding.outcome.replaceAll('_', ' ')}</span></div><p className="finding-message">{finding.message}</p><ClaimMatchConfidence finding={finding} />{finding.matched_text && <blockquote className="finding-excerpt">“{finding.matched_text}”</blockquote>}{finding.approved_wording && <div className="approved-wording"><span>Approved wording</span><p>{finding.approved_wording}</p></div>}{(finding.evidence_source_title || finding.evidence_excerpt) && <div className="evidence-box"><div className="evidence-box-heading"><BadgeCheck size={15} /><strong>{finding.evidence_source_title || 'Claim Passport evidence'}</strong></div>{finding.evidence_excerpt && <p>“{finding.evidence_excerpt}”</p>}{finding.evidence_reference && <small>Reference: {finding.evidence_reference}</small>}{finding.evidence_source_url && <a href={finding.evidence_source_url} target="_blank" rel="noreferrer">Open evidence source <Send size={12} /></a>}</div>}<div className="finding-action"><span>Suggested next step</span><p>{finding.recommended_action}</p></div></article>)}</div>}
                   </>
                 )}
               </section>
@@ -293,7 +403,7 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
 
               <section className="review-decision-panel"><div className="review-decision-header"><div className="review-decision-icon"><ShieldCheck size={21} /></div><div><p className="eyebrow">HUMAN DECISION</p><h3>What is your review outcome?</h3><p>The decision applies to revision {currentRevision?.revision_number ?? '—'} and its latest analysis.</p></div></div><label className="workflow-field"><span>Reviewer note <small>(optional for approval; recommended for changes or rejection)</small></span><textarea value={reviewComment} onChange={(event: { target: { value: string } }) => setReviewComment(event.target.value)} rows={3} maxLength={5000} placeholder="Explain your decision and what the Creator should do next..." /></label><div className="decision-buttons"><button className="button decision-button decision-button--approve" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('approved')}>{busy === 'approved' ? <LoaderCircle className="spin-icon" size={16} /> : <ThumbsUp size={16} />} Approve</button><button className="button decision-button decision-button--changes" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('changes_requested')}>{busy === 'changes_requested' ? <LoaderCircle className="spin-icon" size={16} /> : <Undo2 size={16} />} Request changes</button><button className="button decision-button decision-button--reject" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('rejected')}>{busy === 'rejected' ? <LoaderCircle className="spin-icon" size={16} /> : <ThumbsDown size={16} />} Reject</button></div>{!hasCurrentAnalysis && <p className="workflow-helper">A review decision is disabled until an analysis for the current submitted revision is available.</p>}</section>
 
-              <section className="workflow-section-block"><div className="workflow-section-heading"><div><p className="eyebrow">ACCOUNTABILITY</p><h3>Review & activity history</h3></div><History size={17} /></div>{decisions.length > 0 && <div className="revision-history-list review-history-list">{decisions.map((decision) => <div className="revision-history-item" key={decision.id}><span className="revision-history-number">{decision.decision === 'approved' ? '✓' : decision.decision === 'rejected' ? '×' : '↺'}</span><div><strong>{decisionLabel(decision.decision)}</strong><small>{formatDate(decision.created_at)} · reviewer {decision.reviewer_id.slice(0, 8)}</small>{decision.reviewer_comment && <p>{decision.reviewer_comment}</p>}</div></div>)}</div>}{events.length > 0 && <div className="audit-list">{events.slice(0, 8).map((event) => <div className="audit-item" key={event.id}><span className="audit-dot" /><div><strong>{event.event_type.replaceAll('_', ' ')}</strong><small>{formatDate(event.created_at)} · {event.actor_id === user?.id ? 'You' : event.actor_id.slice(0, 8)}</small></div></div>)}</div>}{decisions.length === 0 && events.length === 0 && <p className="workflow-muted-copy">No previous review events.</p>}</section>
+              <section className="workflow-section-block"><div className="workflow-section-heading"><div><p className="eyebrow">ACCOUNTABILITY</p><h3>Review & activity history</h3></div><History size={17} /></div>{decisions.length > 0 && <div className="revision-history-list review-history-list">{decisions.map((decision) => <div className="revision-history-item" key={decision.id}><span className="revision-history-number">{decision.decision === 'approved' ? '✓' : decision.decision === 'rejected' ? '×' : '↺'}</span><div><strong>{decisionLabel(decision.decision)}</strong><small>{formatDate(decision.created_at)} · reviewer {decision.reviewer_id.slice(0, 8)}</small>{decision.reviewer_comment && <p>{decision.reviewer_comment}</p>}<ReviewDecisionContext decision={decision} /></div></div>)}</div>}{events.length > 0 && <div className="audit-list">{events.slice(0, 8).map((event) => <div className="audit-item" key={event.id}><span className="audit-dot" /><div><strong>{event.event_type.replaceAll('_', ' ')}</strong><small>{formatDate(event.created_at)} · {event.actor_id === user?.id ? 'You' : event.actor_id.slice(0, 8)}</small></div></div>)}</div>}{decisions.length === 0 && events.length === 0 && <p className="workflow-muted-copy">No previous review events.</p>}</section>
             </>
           )}
         </section>

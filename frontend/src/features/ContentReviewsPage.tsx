@@ -47,6 +47,7 @@ import {
   type ReviewDecisionRecord,
 } from '../lib/content'
 import type { WorkspaceRole } from '../lib/workspaces'
+import ClaimMatchConfidence from './ClaimMatchConfidence'
 import './WorkflowPages.css'
 
 type Props = { workspaceId: string; role: WorkspaceRole }
@@ -129,6 +130,8 @@ function FindingCard({ finding }: { finding: AnalysisFinding }) {
           )}
         </div>
       )}
+
+      <ClaimMatchConfidence finding={finding} />
 
       {finding.approved_wording && (
         <div className="approved-wording">
