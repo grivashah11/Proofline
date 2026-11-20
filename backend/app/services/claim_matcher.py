@@ -81,12 +81,107 @@ def normalize_subject(value: str | None) -> str:
     return normalize_identity(normalized)
 
 
+# These aliases are deliberately phrase-specific. They bridge the known wording
+# variation between the Passport authoring form and AI claim extraction without
+# using fuzzy/token-overlap matching that could merge different claim concepts.
+_ATTRIBUTE_ALIASES = {
+    # These exact phrases describe the same measurable property in the
+    # Northstar wireless-headphone Passport. Keep aliases phrase-specific;
+    # never use fuzzy or token-overlap matching for claim identity.
+    "wireless playback battery life": "wireless audio playback battery life",
+    "wireless audio playback duration": "wireless audio playback battery life",
+    # Exact wording observed in the real Northstar extraction response.
+    "continuous wireless audio playback hours": "wireless audio playback battery life",
+    "continuous wireless audio playback duration": "wireless audio playback battery life",
+    "wireless audio playback hours": "wireless audio playback battery life",
+}
+
+
 def normalize_attribute(value: str | None) -> str:
-    return normalize_identity(value)
+    normalized = normalize_identity(value)
+    return _ATTRIBUTE_ALIASES.get(normalized, normalized)
 
 
 def normalize_scope(value: str | None) -> str:
     return normalize_identity(value)
+
+
+def _claim_subject_matches_passport(
+    claim: ExtractedClaim,
+    passport: dict,
+    version: dict,
+) -> bool:
+    """Match a base product subject or its exact, Passport-registered variant.
+
+    Some extraction responses append a named model variant to ``subject``
+    (for example, "Product — Standard Model") and put only the generic word
+    "variant" in ``product_scope``. Accept that representation only when the
+    complete extracted subject is an exact match for this version's registered
+    product_scope and the Passport/version base subjects agree. This keeps
+    Standard Model and Pro Model Passports distinct; no fuzzy matching is used.
+    """
+    claim_subject = normalize_subject(claim.subject)
+    passport_subject = normalize_subject(passport.get("subject"))
+    version_subject = normalize_subject(version.get("subject"))
+
+    if not claim_subject or not passport_subject or version_subject != passport_subject:
+        return False
+
+    if claim_subject == passport_subject:
+        return True
+
+    registered_variant_scope = normalize_scope(version.get("product_scope"))
+    return bool(
+        registered_variant_scope
+        and claim_subject == registered_variant_scope
+        and registered_variant_scope.startswith(f"{passport_subject} ")
+    )
+
+
+def _product_scope_match(
+    expected: str | None,
+    actual: str | None,
+    *,
+    claim_subject: str | None,
+    passport_subject: str | None,
+) -> tuple[bool | None, str]:
+    """Compare product scope, allowing an exact variant named in claim subject.
+
+    The fallback is intentionally limited to an exact full-string match between
+    the extracted subject and this Passport version's product_scope. It is used
+    only when the extractor left product_scope empty or returned a generic
+    marker such as "variant"/"model". A different or missing named variant is
+    not silently accepted.
+    """
+    if scope_is_unrestricted(expected):
+        return None, "The Passport does not restrict product scope."
+
+    expected_normalized = normalize_scope(expected)
+    actual_normalized = normalize_scope(actual)
+    if actual_normalized == expected_normalized:
+        return True, "The extracted product scope matches the Passport scope."
+
+    generic_scope_labels = {"variant", "model", "product variant", "specific variant"}
+    normalized_claim_subject = normalize_subject(claim_subject)
+    normalized_passport_subject = normalize_subject(passport_subject)
+    exact_variant_named_in_subject = bool(
+        expected_normalized
+        and normalized_claim_subject == expected_normalized
+        and normalized_passport_subject
+        and expected_normalized.startswith(f"{normalized_passport_subject} ")
+        and (not actual_normalized or actual_normalized in generic_scope_labels)
+    )
+    if exact_variant_named_in_subject:
+        return (
+            True,
+            "The claim subject exactly names the product variant registered in this Passport; the extracted product-scope field was generic.",
+        )
+
+    if actual_normalized in generic_scope_labels:
+        return False, "The draft identifies only a generic product variant, not the specific Passport scope."
+    if not actual_normalized:
+        return False, "The required product scope is missing from the draft context."
+    return False, "The draft product scope differs from the Passport scope."
 
 
 def subject_model_years(*values: str | None) -> set[str]:
@@ -336,6 +431,8 @@ def _confidence_result(
     *,
     span_verified: bool,
     matching_count: int,
+    subject_match_count: int,
+    attribute_match_count: int,
     passport: dict | None,
     version: dict | None,
     channel: str | None,
@@ -359,16 +456,27 @@ def _confidence_result(
         ),
         _ConfidenceInput(
             "subject", "Subject identity", 0.15, True,
-            bool(passport),
-            "Subject identity matched after conservative normalization."
-            if passport else "Subject identity could not be linked to a Passport.",
+            subject_match_count > 0,
+            (
+                "The subject matched an active Passport subject or its exact registered product variant."
+                if subject_match_count == 1
+                else "The subject matched multiple Passport identities; the final selection remains ambiguous."
+                if subject_match_count > 1
+                else "No active Passport subject or exact registered product variant matched."
+            ),
         ),
         _ConfidenceInput(
             "attribute", "Claim attribute", 0.10, True,
-            bool(passport and version and normalize_attribute(claim.attribute) == normalize_attribute(version.get("attribute"))),
-            "The attribute matched after conservative normalization."
-            if passport and version and normalize_attribute(claim.attribute) == normalize_attribute(version.get("attribute"))
-            else "The attribute could not be confirmed against a unique Passport.",
+            attribute_match_count > 0,
+            (
+                "The attribute matched after conservative normalization."
+                if attribute_match_count == 1
+                else "The attribute matched more than one subject-compatible Passport."
+                if attribute_match_count > 1
+                else "The extracted attribute did not match the subject-compatible Passport attribute."
+                if subject_match_count > 0
+                else "The attribute could not be checked because no subject-compatible Passport was found."
+            ),
         ),
     ]
 
@@ -424,7 +532,12 @@ def _confidence_result(
             ))
 
         scope_checks = [
-            _scope_match(version.get("product_scope"), claim.product_scope),
+            _product_scope_match(
+                version.get("product_scope"),
+                claim.product_scope,
+                claim_subject=claim.subject,
+                passport_subject=passport.get("subject"),
+            ),
             _scope_match(version.get("channel_scope"), channel or claim.channel_scope),
             _scope_match(version.get("market_scope"), market or claim.market_scope),
         ]
@@ -538,20 +651,21 @@ def create_assessment(
     )
 
 
-def find_matching_passports(
+def find_subject_matching_passports(
     claim: ExtractedClaim,
     passports: list[dict],
     versions_by_id: dict[str, dict],
 ) -> list[tuple[dict, dict]]:
+    """Return active Passport versions whose product identity matches the claim.
+
+    Attribute matching is intentionally a separate second step. This allows
+    diagnostics to report that the product subject matched even when the
+    extracted property label did not.
+    """
     matches: list[tuple[dict, dict]] = []
-    claim_subject = normalize_subject(claim.subject)
-    claim_attribute = normalize_attribute(claim.attribute)
 
     for passport in passports:
         if passport.get("status") not in {"active", "review_due"}:
-            continue
-        passport_subject = normalize_subject(passport.get("subject"))
-        if not claim_subject or claim_subject != passport_subject:
             continue
 
         version_id = passport.get("current_version_id")
@@ -560,9 +674,7 @@ def find_matching_passports(
         version = versions_by_id.get(str(version_id))
         if not version or version.get("status") != "active":
             continue
-        if normalize_subject(version.get("subject")) != claim_subject:
-            continue
-        if normalize_attribute(version.get("attribute")) != claim_attribute:
+        if not _claim_subject_matches_passport(claim, passport, version):
             continue
 
         claim_years = subject_model_years(claim.subject, claim.product_scope)
@@ -578,6 +690,22 @@ def find_matching_passports(
         matches.append((passport, version))
 
     return matches
+
+
+def find_matching_passports(
+    claim: ExtractedClaim,
+    passports: list[dict],
+    versions_by_id: dict[str, dict],
+) -> list[tuple[dict, dict]]:
+    subject_matches = find_subject_matching_passports(
+        claim, passports, versions_by_id,
+    )
+    claim_attribute = normalize_attribute(claim.attribute)
+    return [
+        (passport, version)
+        for passport, version in subject_matches
+        if normalize_attribute(version.get("attribute")) == claim_attribute
+    ]
 
 
 def evaluate_passport_claim(
@@ -619,7 +747,12 @@ def evaluate_passport_claim(
         )
 
     scope_results = [
-        _scope_match(version.get("product_scope"), claim.product_scope),
+        _product_scope_match(
+            version.get("product_scope"),
+            claim.product_scope,
+            claim_subject=claim.subject,
+            passport_subject=passport.get("subject"),
+        ),
         _scope_match(version.get("channel_scope"), channel or claim.channel_scope),
         _scope_match(version.get("market_scope"), market or claim.market_scope),
     ]
@@ -696,7 +829,16 @@ def match_claims(
         if span_verified:
             search_cursor = next_cursor
 
-        matching = find_matching_passports(claim, passports, versions_by_id)
+        subject_matches = find_subject_matching_passports(
+            claim, passports, versions_by_id,
+        )
+        claim_attribute = normalize_attribute(claim.attribute)
+        attribute_matches = [
+            (candidate_passport, candidate_version)
+            for candidate_passport, candidate_version in subject_matches
+            if normalize_attribute(candidate_version.get("attribute")) == claim_attribute
+        ]
+        matching = attribute_matches
         passport = matching[0][0] if len(matching) == 1 else None
         version = matching[0][1] if len(matching) == 1 else None
 
@@ -727,6 +869,8 @@ def match_claims(
             claim,
             span_verified=span_verified,
             matching_count=len(matching),
+            subject_match_count=len(subject_matches),
+            attribute_match_count=len(attribute_matches),
             passport=passport,
             version=version,
             channel=channel,

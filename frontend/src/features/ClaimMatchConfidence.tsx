@@ -31,16 +31,37 @@ function normalizedRows(claim: NormalizedClaim): DetailRow[] {
   ].filter((row) => row.value !== null)
 }
 
-function FactorStatus({ applicable, matched }: { applicable: boolean; matched: boolean | null }) {
+function FactorStatus({
+  factorName,
+  applicable,
+  matched,
+}: {
+  factorName: string
+  applicable: boolean
+  matched: boolean | null
+}) {
   if (!applicable) {
     return <span className="match-factor-status match-factor-status--neutral"><MinusCircle size={12} /> Not applicable</span>
   }
-  if (matched === true) {
-    return <span className="match-factor-status match-factor-status--matched"><CheckCircle2 size={12} /> Matched</span>
+
+  // A comparable value/unit is not necessarily an agreeing value/unit.
+  // The finding outcome and explanation communicate agreement or conflict.
+  if (factorName === 'value' || factorName === 'unit') {
+    if (matched === true) {
+      return <span className="match-factor-status match-factor-status--matched"><CheckCircle2 size={12} /> Comparable</span>
+    }
+    if (matched === false) {
+      return <span className="match-factor-status match-factor-status--different"><CircleAlert size={12} /> Not comparable</span>
+    }
+  } else {
+    if (matched === true) {
+      return <span className="match-factor-status match-factor-status--matched"><CheckCircle2 size={12} /> Matched</span>
+    }
+    if (matched === false) {
+      return <span className="match-factor-status match-factor-status--different"><CircleAlert size={12} /> Difference</span>
+    }
   }
-  if (matched === false) {
-    return <span className="match-factor-status match-factor-status--different"><CircleAlert size={12} /> Difference</span>
-  }
+
   return <span className="match-factor-status match-factor-status--neutral"><MinusCircle size={12} /> Not compared</span>
 }
 
@@ -69,6 +90,15 @@ export default function ClaimMatchConfidence({ finding }: Props) {
           </span>
         )}
       </div>
+
+      {finding.outcome === 'conflict' && (
+        <div className="match-confidence-conflict-note" role="note">
+          <CircleAlert size={16} />
+          <p>
+            <strong>The draft conflicts with the approved Passport.</strong> A value marked “Comparable” can still be different from the approved value. Compare the draft excerpt and approved wording shown with this finding before deciding what to change.
+          </p>
+        </div>
+      )}
 
       {!hasMetadata ? (
         <div className="match-confidence-missing">
@@ -116,7 +146,7 @@ export default function ClaimMatchConfidence({ finding }: Props) {
                   <article className="match-factor-item" key={factor.name}>
                     <div className="match-factor-topline">
                       <strong>{factor.label}</strong>
-                      <FactorStatus applicable={factor.applicable} matched={factor.matched} />
+                      <FactorStatus factorName={factor.name} applicable={factor.applicable} matched={factor.matched} />
                     </div>
                     <p>{factor.explanation}</p>
                     <small>Comparison weight: {Math.round(factor.weight * 100)}%</small>

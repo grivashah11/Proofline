@@ -633,3 +633,9 @@
     flex-direction: column;
   }
 }
+
+.cpet-load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 2px;
+}

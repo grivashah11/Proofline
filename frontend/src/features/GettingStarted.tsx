@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, ChevronRight, Circle, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Circle, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
+import { useAuth } from '../lib/auth-context'
 import type { WorkspaceRole } from '../lib/workspaces'
 import './GettingStarted.css'
 
@@ -24,6 +25,7 @@ type MemberSummary = {
 
 type SubmissionSummary = {
   status: string
+  created_by: string
 }
 
 type SetupSnapshot = {
@@ -63,6 +65,7 @@ const initialSnapshot: SetupSnapshot = {
 async function fetchSetupSnapshot(
   workspaceId: string,
   role: WorkspaceRole,
+  currentUserId: string | null,
 ): Promise<SetupLoadResult> {
   const base = `/api/v1/workspaces/${workspaceId}`
   const results = await Promise.allSettled([
@@ -95,7 +98,10 @@ async function fetchSetupSnapshot(
           : null,
       firstReview:
         submissions.status === 'fulfilled'
-          ? submissions.value.some((item) => ['approved', 'changes_requested', 'rejected'].includes(item.status))
+          ? submissions.value.some((item) =>
+              ['approved', 'changes_requested', 'rejected'].includes(item.status) &&
+              (role === 'brand_owner' || Boolean(currentUserId && item.created_by === currentUserId)),
+            )
           : null,
     },
     loadError: results.some((result) => result.status === 'rejected'),
@@ -109,16 +115,18 @@ export default function GettingStarted({
   workspaceId: string
   role: WorkspaceRole
 }) {
+  const { user } = useAuth()
   const [snapshot, setSnapshot] = useState<SetupSnapshot>(initialSnapshot)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
+  const [showAllSteps, setShowAllSteps] = useState(false)
 
   // Initial loading: fetch first, then update state from the Promise callback.
   // The effect itself does not synchronously call a state-setting loader.
   useEffect(() => {
     let active = true
 
-    fetchSetupSnapshot(workspaceId, role)
+    fetchSetupSnapshot(workspaceId, role, user?.id ?? null)
       .then((result) => {
         if (!active) return
         setSnapshot(result.snapshot)
@@ -134,7 +142,7 @@ export default function GettingStarted({
     return () => {
       active = false
     }
-  }, [workspaceId, role])
+  }, [workspaceId, role, user?.id])
 
   // Refresh is initiated by a user interaction, so synchronous loading-state
   // updates are appropriate here.
@@ -142,7 +150,7 @@ export default function GettingStarted({
     setLoading(true)
     setLoadError(false)
 
-    fetchSetupSnapshot(workspaceId, role)
+    fetchSetupSnapshot(workspaceId, role, user?.id ?? null)
       .then((result) => {
         setSnapshot(result.snapshot)
         setLoadError(result.loadError)
@@ -153,7 +161,7 @@ export default function GettingStarted({
       .finally(() => {
         setLoading(false)
       })
-  }, [workspaceId, role])
+  }, [workspaceId, role, user?.id])
 
   const steps = useMemo<SetupStep[]>(() => [
     {
@@ -186,16 +194,18 @@ export default function GettingStarted({
       id: 'teammate',
       title: role === 'brand_owner' ? 'Connect a Creator' : 'Know your review team',
       description: role === 'brand_owner'
-        ? 'Add a registered Creator so they can submit content for review.'
+        ? 'Register a second account as Creator in a private browser window, copy its ID, then add it here.'
         : 'Check who owns the workspace and who can make the final decision.',
       to: '/team',
-      action: role === 'brand_owner' ? 'Manage team members' : 'View team members',
+      action: role === 'brand_owner' ? 'Add a Creator account' : 'View team members',
       done: snapshot.teammate,
     },
     {
       id: 'firstReview',
       title: 'Complete your first review cycle',
-      description: 'Submit a draft, inspect the findings and send the exact revision to an authorised reviewer.',
+      description: role === 'brand_owner'
+        ? 'From the Creator account, submit a draft. Run checks, then return here to review the exact revision.'
+        : 'Submit a draft, review the findings, make corrections and send the revision to your Brand Owner.',
       to: '/content',
       action: 'Open content reviews',
       done: snapshot.firstReview,
@@ -208,16 +218,16 @@ export default function GettingStarted({
   const allComplete = completed === steps.length
 
   return (
-    <section className="getting-started-panel" aria-labelledby="getting-started-title">
+    <section id="getting-started-panel" className="getting-started-panel" aria-labelledby="getting-started-title" tabIndex={-1}>
       <div className="getting-started-heading">
         <div className="getting-started-heading-copy">
           <span className="getting-started-icon"><Sparkles size={17} /></span>
           <div>
             <p className="eyebrow">A CLEAR PLACE TO START</p>
-            <h2 id="getting-started-title">{allComplete ? 'Your workspace is ready' : 'Getting started with Proofline'}</h2>
+            <h2 id="getting-started-title">{allComplete ? 'Your workspace is ready' : 'Your next step'}</h2>
             <p>{allComplete
-              ? 'You have completed the core setup. You can return to these sections whenever your brand knowledge changes.'
-              : 'Follow these steps to prepare your brand knowledge and complete a first review. Your progress updates from the workspace records.'}</p>
+              ? 'Your core setup is complete. You can revisit any step whenever your brand knowledge changes.'
+              : 'Follow the recommended next action. Your progress is checked against this workspace.'}</p>
           </div>
         </div>
         <button className="getting-started-refresh" type="button" onClick={handleRefresh} disabled={loading} aria-label="Refresh setup progress">
@@ -239,29 +249,64 @@ export default function GettingStarted({
         </div>
       )}
 
-      <div className="getting-started-steps">
-        {steps.map((step, index) => {
-          const isNext = step.id === nextStep?.id
-          return (
-            <Link
-              className={`getting-started-step ${step.done === true ? 'is-complete' : ''} ${isNext ? 'is-next' : ''}`}
-              to={step.to}
-              key={step.id}
-            >
-              <span className="getting-started-step-marker" aria-hidden="true">
-                {step.done === true ? <Check size={15} /> : loading || step.done === null ? <Circle size={13} /> : index + 1}
-              </span>
-              <span className="getting-started-step-copy">
-                <strong>{step.title}</strong>
-                <small>{step.description}</small>
-                <span className="getting-started-step-action">{step.action} <ChevronRight size={14} /></span>
-              </span>
-              {isNext && !allComplete && <span className="getting-started-next-label">NEXT</span>}
-              {step.done === true && <span className="getting-started-complete-label">Done</span>}
-            </Link>
-          )
-        })}
-      </div>
+      {!loading && nextStep && (
+        <div className="getting-started-next-wrap">
+          <p className="getting-started-next-kicker">RECOMMENDED NEXT ACTION</p>
+          <Link className="getting-started-next-card" to={nextStep.to}>
+            <span className="getting-started-step-marker" aria-hidden="true">{steps.findIndex((step) => step.id === nextStep.id) + 1}</span>
+            <span className="getting-started-step-copy">
+              <strong>{nextStep.title}</strong>
+              <small>{nextStep.description}</small>
+              <span className="getting-started-step-action">{nextStep.action} <ChevronRight size={14} /></span>
+            </span>
+            <ChevronRight className="getting-started-next-arrow" size={19} />
+          </Link>
+        </div>
+      )}
+
+      {allComplete && (
+        <div className="getting-started-complete-note">
+          <Check size={16} />
+          Your core setup is complete. You can still review all steps below.
+        </div>
+      )}
+
+      <button
+        className="getting-started-toggle"
+        type="button"
+        aria-expanded={showAllSteps}
+        aria-controls="getting-started-all-steps"
+        onClick={() => setShowAllSteps((value) => !value)}
+      >
+        {showAllSteps ? 'Hide all steps' : `View all ${steps.length} setup steps`}
+        <ChevronDown size={15} className={showAllSteps ? 'is-expanded' : ''} />
+      </button>
+
+      {showAllSteps && (
+        <div className="getting-started-steps" id="getting-started-all-steps">
+          {steps.map((step, index) => {
+            const isNext = step.id === nextStep?.id
+            return (
+              <Link
+                className={`getting-started-step ${step.done === true ? 'is-complete' : ''} ${isNext ? 'is-next' : ''}`}
+                to={step.to}
+                key={step.id}
+              >
+                <span className="getting-started-step-marker" aria-hidden="true">
+                  {step.done === true ? <Check size={15} /> : step.done === null ? <Circle size={13} /> : index + 1}
+                </span>
+                <span className="getting-started-step-copy">
+                  <strong>{step.title}</strong>
+                  <small>{step.description}</small>
+                  <span className="getting-started-step-action">{step.action} <ChevronRight size={14} /></span>
+                </span>
+                {isNext && !allComplete && <span className="getting-started-next-label">NEXT</span>}
+                {step.done === true && <span className="getting-started-complete-label">Done</span>}
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </section>
   )
 }

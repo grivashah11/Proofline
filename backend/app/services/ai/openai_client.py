@@ -38,14 +38,23 @@ EXTRACTION RULES:
    containing the claim itself from the submitted draft. Do not append
    surrounding explanation to exact_text.
 4. Preserve exact_text spelling, capitalization and punctuation.
-5. Identify the specific product/model as the subject. When several claims
+5. Identify the base product identity as the subject. When several claims
    refer to the same product, use the same concise subject string for each.
    Do not replace a named product with a generic subject such as "the laptop".
+   Keep a named model/variant in product_scope rather than appending it to the
+   base subject whenever the base product can be identified separately. For
+   example, use subject "Northstar Pulse Wireless Headphones" and product_scope
+   "Northstar Pulse Wireless Headphones — Standard Model". Never replace a
+   clearly named variant with a generic label such as "variant" or "model".
    A trailing model-year parenthetical may be omitted from subject when the
    product identity is otherwise clear; never change or invent a model year.
 6. Use a stable, concise attribute label for the same property across claims.
-   For example, describe both "up to 18 hours" and "up to 30 hours" claims
-   about streaming battery life with the same attribute label.
+   For example, use "wireless audio playback battery life" for claims about
+   hours of continuous wireless audio playback on a full charge, and use that
+   same label for both 30-hour and 40-hour claims. Do not change the attribute
+   to "duration", "continuous wireless audio playback hours", or another label
+   for the same battery-life property; the deterministic matcher also maps the
+   observed wording to this canonical Passport attribute.
 7. Extract numerical values as plain decimal strings (for example, "18" or
    "30"), without units, currency symbols or qualifiers.
 8. Extract units and qualifiers separately. Preserve the qualifier meaning;
@@ -95,8 +104,9 @@ CLAIM_OUTPUT_SCHEMA = {
                         "minLength": 1,
                         "maxLength": 300,
                         "description": (
-                            "Specific product/model identity. Use the same concise "
-                            "subject for claims about the same product; do not use "
+                            "Base product identity. Use the same concise subject "
+                            "for claims about the same product. Keep a named model "
+                            "variant in product_scope where possible; do not use "
                             "generic labels such as 'the laptop'."
                         ),
                     },
@@ -149,7 +159,11 @@ CLAIM_OUTPUT_SCHEMA = {
                     "product_scope": {
                         "type": ["string", "null"],
                         "maxLength": 300,
-                        "description": "Product or product variant to which the claim applies.",
+                        "description": (
+                        "Exact product/model/variant to which the claim applies. "
+                        "When identifiable, name the full variant rather than returning "
+                        "a generic value such as 'variant'."
+                    ),
                     },
                     "channel_scope": {
                         "type": ["string", "null"],

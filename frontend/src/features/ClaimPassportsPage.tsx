@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   AlertCircle,
   BadgeCheck,
@@ -261,6 +261,8 @@ export default function ClaimPassportsPage({
   const [loading, setLoading] = useState(true)
   const [pageError, setPageError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [activatingVersionId, setActivatingVersionId] = useState<string | null>(null)
+  const activationLockRef = useRef<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
@@ -577,7 +579,7 @@ export default function ClaimPassportsPage({
   }
 
   async function activateVersion(version: PassportVersionRecord) {
-    if (!selectedPassport) return
+    if (!selectedPassport || activationLockRef.current) return
 
     const confirmed = window.confirm(
       `Activate version ${version.version_number}?\n\nThe backend will verify its evidence and requirements before activation.`,
@@ -585,6 +587,8 @@ export default function ClaimPassportsPage({
 
     if (!confirmed) return
 
+    activationLockRef.current = version.id
+    setActivatingVersionId(version.id)
     setActionError('')
 
     try {
@@ -599,6 +603,9 @@ export default function ClaimPassportsPage({
       setActionError(
         `This version could not be activated: ${errorMessage(error)}`,
       )
+    } finally {
+      activationLockRef.current = null
+      setActivatingVersionId((current) => current === version.id ? null : current)
     }
   }
 
@@ -960,9 +967,12 @@ export default function ClaimPassportsPage({
                           className="cp-button cp-button-primary cp-activate-button"
                           type="button"
                           onClick={() => void activateVersion(version)}
+                          disabled={activatingVersionId !== null}
                         >
-                          <ShieldCheck size={15} />
-                          Verify & activate
+                          {activatingVersionId === version.id
+                            ? <LoaderCircle className="cp-spinner" size={15} />
+                            : <ShieldCheck size={15} />}
+                          {activatingVersionId === version.id ? 'Activating…' : 'Verify & activate'}
                         </button>
                       )}
                     </div>

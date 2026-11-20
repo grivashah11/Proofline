@@ -610,3 +610,285 @@ def test_missing_material_qualifier_caps_comparison_confidence():
     )
     assert qualifier_factor.applicable is True
     assert qualifier_factor.matched is False
+
+
+def test_wireless_playback_battery_attribute_alias_matches_passport():
+    content = (
+        "The Northstar Pulse Wireless Headphones deliver up to 30 hours "
+        "of wireless audio playback on a full charge."
+    )
+    claim = make_claim(
+        text=content,
+        subject="Northstar Pulse Wireless Headphones",
+        attribute="wireless playback battery life",
+        product_scope="Northstar Pulse Wireless Headphones — Standard Model",
+        numeric_value="30",
+        unit="hours",
+        qualifier="up to",
+        value_text="30 hours",
+    )
+    passport, version = make_records(
+        subject="Northstar Pulse Wireless Headphones",
+        attribute="wireless audio playback battery life",
+        numeric_value="30",
+        permitted_value="up to 30 hours",
+        product_scope="Northstar Pulse Wireless Headphones — Standard Model",
+    )
+    version["required_conditions"] = None
+
+    assessment = run_match(content, claim, passport, version)
+
+    assert assessment.status == PassportMatchStatus.SUPPORTED
+    assert assessment.passport_code == "PFL-TEST-001"
+    assert assessment.confidence_score >= 0.85
+    attribute_factor = next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "attribute"
+    )
+    assert attribute_factor.matched is True
+
+
+def test_wireless_battery_alias_does_not_hide_numeric_conflict():
+    content = (
+        "The Northstar Pulse Wireless Headphones deliver up to 40 hours "
+        "of wireless audio playback on a full charge."
+    )
+    claim = make_claim(
+        text=content,
+        subject="Northstar Pulse Wireless Headphones",
+        attribute="wireless playback battery life",
+        product_scope="Northstar Pulse Wireless Headphones — Standard Model",
+        numeric_value="40",
+        unit="hours",
+        qualifier="up to",
+        value_text="40 hours",
+    )
+    passport, version = make_records(
+        subject="Northstar Pulse Wireless Headphones",
+        attribute="wireless audio playback battery life",
+        numeric_value="30",
+        permitted_value="up to 30 hours",
+        product_scope="Northstar Pulse Wireless Headphones — Standard Model",
+    )
+    version["required_conditions"] = None
+
+    assessment = run_match(content, claim, passport, version)
+
+    assert assessment.status == PassportMatchStatus.CONFLICT
+    assert assessment.passport_code == "PFL-TEST-001"
+
+
+def test_wireless_battery_alias_does_not_match_standby_time():
+    content = "The Northstar Pulse Wireless Headphones deliver up to 30 hours of standby time."
+    claim = make_claim(
+        text=content,
+        subject="Northstar Pulse Wireless Headphones",
+        attribute="standby time",
+        product_scope="Northstar Pulse Wireless Headphones — Standard Model",
+        numeric_value="30",
+        unit="hours",
+        qualifier="up to",
+        value_text="30 hours",
+    )
+    passport, version = make_records(
+        subject="Northstar Pulse Wireless Headphones",
+        attribute="wireless audio playback battery life",
+        numeric_value="30",
+        permitted_value="up to 30 hours",
+        product_scope="Northstar Pulse Wireless Headphones — Standard Model",
+    )
+    version["required_conditions"] = None
+
+    assessment = run_match(content, claim, passport, version)
+
+    assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+    assert assessment.passport_code is None
+    factors = {factor.name: factor for factor in assessment.confidence_factors}
+    assert factors["subject"].matched is True
+    assert factors["attribute"].matched is False
+    assert factors["passport_unique"].matched is False
+
+
+def _northstar_extracted_variant_case(*, hours="30", variant="Standard Model", conditions=None):
+    base_subject = "Northstar Pulse Wireless Headphones"
+    full_variant = f"{base_subject} — {variant}"
+    content = (
+        f"The {full_variant} deliver up to {hours} hours of continuous "
+        "wireless audio playback on a full charge under the stated demo test conditions."
+    )
+    claim = make_claim(
+        text=content,
+        subject=full_variant,
+        attribute="continuous wireless audio playback hours",
+        product_scope="variant",
+        numeric_value=hours,
+        unit="hours",
+        qualifier="up to",
+        conditions=conditions,
+        value_text=f"{hours} hours",
+    )
+    passport, version = make_records(
+        subject=base_subject,
+        attribute="wireless audio playback battery life",
+        numeric_value="30",
+        permitted_value="up to 30 hours",
+        product_scope=f"{base_subject} — Standard Model",
+        channel_scope="Website",
+        market_scope="India",
+    )
+    version["required_conditions"] = None
+    return content, claim, passport, version
+
+
+def test_actual_extracted_variant_subject_and_duration_attribute_match_passport():
+    """Reproduce the exact subject/attribute wording seen in the live UI test."""
+    content, claim, passport, version = _northstar_extracted_variant_case()
+
+    assessment = run_match(
+        content,
+        claim,
+        passport,
+        version,
+        channel="Website",
+        market="India",
+    )
+
+    assert assessment.status == PassportMatchStatus.SUPPORTED
+    assert assessment.passport_code == "PFL-TEST-001"
+    assert assessment.confidence_score >= 0.85
+    assert next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "subject"
+    ).matched is True
+    assert next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "attribute"
+    ).matched is True
+    assert next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "scope"
+    ).matched is True
+
+
+def test_observed_continuous_playback_hours_phrase_matches_with_full_conditions():
+    base_subject = "Northstar Pulse Wireless Headphones"
+    full_variant = f"{base_subject} — Standard Model"
+    content = (
+        f"The {full_variant} deliver up to 30 hours of continuous "
+        "wireless audio playback on a full charge. "
+        "Test conditions: Continuous Bluetooth audio playback using AAC codec "
+        "at 50% volume, Active Noise Cancellation (ANC) turned off, standard "
+        "firmware and ambient temperature of 23 ± 2°C. Testing starts with a "
+        "fully charged battery and continues until playback stops."
+    )
+    claim = make_claim(
+        text=(
+            f"The {full_variant} deliver up to 30 hours of continuous "
+            "wireless audio playback on a full charge."
+        ),
+        subject=full_variant,
+        attribute="continuous wireless audio playback hours",
+        product_scope="variant",
+        numeric_value="30",
+        unit="hours",
+        qualifier="up to",
+        conditions=(
+            "Continuous Bluetooth audio playback using AAC codec at 50% volume, "
+            "Active Noise Cancellation (ANC) turned off, standard firmware and "
+            "ambient temperature of 23 ± 2°C. Testing starts with a fully "
+            "charged battery and continues until playback stops."
+        ),
+        value_text="30 hours",
+    )
+    passport, version = make_records(
+        subject=base_subject,
+        attribute="wireless audio playback battery life",
+        numeric_value="30",
+        permitted_value="up to 30 hours",
+        product_scope=full_variant,
+        channel_scope="Website",
+        market_scope="India",
+    )
+    version["required_conditions"] = (
+        "Continuous Bluetooth audio playback using AAC codec at 50% volume; "
+        "Active Noise Cancellation (ANC) turned off; standard firmware; "
+        "ambient temperature of 23 ± 2°C; testing starts with a fully charged battery."
+    )
+
+    assessment = run_match(
+        content, claim, passport, version, channel="Website", market="India",
+    )
+
+    assert assessment.status == PassportMatchStatus.SUPPORTED
+    assert assessment.passport_code == "PFL-TEST-001"
+    assert assessment.confidence_score >= 0.95
+    factors = {factor.name: factor for factor in assessment.confidence_factors}
+    assert factors["passport_unique"].matched is True
+    assert factors["subject"].matched is True
+    assert factors["attribute"].matched is True
+    assert factors["conditions"].matched is True
+
+
+def test_actual_extracted_variant_subject_still_detects_numeric_conflict():
+    content, claim, passport, version = _northstar_extracted_variant_case(hours="40")
+
+    assessment = run_match(
+        content,
+        claim,
+        passport,
+        version,
+        channel="Website",
+        market="India",
+    )
+
+    assert assessment.status == PassportMatchStatus.CONFLICT
+    assert assessment.passport_code == "PFL-TEST-001"
+    assert "Compared 40 hours with 30 hours" in assessment.explanation
+
+
+def test_exact_variant_match_does_not_bypass_incomplete_required_conditions():
+    content, claim, passport, version = _northstar_extracted_variant_case(
+        conditions="under the stated demo test conditions"
+    )
+    version["required_conditions"] = (
+        "Continuous Bluetooth audio playback using AAC codec at 50% volume; "
+        "Active Noise Cancellation (ANC) turned off; standard firmware; "
+        "ambient temperature of 23 ± 2°C; testing starts with a fully charged battery."
+    )
+
+    assessment = run_match(
+        content,
+        claim,
+        passport,
+        version,
+        channel="Website",
+        market="India",
+    )
+
+    assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+    assert assessment.passport_code == "PFL-TEST-001"
+    assert 0.30 < assessment.confidence_score <= 0.79
+    condition_factor = next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "conditions"
+    )
+    assert condition_factor.matched is False
+
+
+def test_full_subject_cannot_match_a_different_registered_product_variant():
+    content, claim, passport, version = _northstar_extracted_variant_case(
+        variant="Pro Model"
+    )
+
+    assessment = run_match(
+        content,
+        claim,
+        passport,
+        version,
+        channel="Website",
+        market="India",
+    )
+
+    assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+    assert assessment.passport_code is None
+    assert assessment.confidence_score <= 0.30

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -100,33 +100,42 @@ export function PassportSourceLinks({
   versionId: string
 }) {
   const [sources, setSources] = useState<ClaimPassportVersionSourceRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [loadedKey, setLoadedKey] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const requestKey = `${workspaceId}:${passportId}:${versionId}:${retryKey}`
+  const loading = loadedKey !== requestKey
 
   useEffect(() => {
     let active = true
+    const effectRequestKey = `${workspaceId}:${passportId}:${versionId}:${retryKey}`
     apiRequest<ClaimPassportVersionSourceRecord[]>(
       `/api/v1/workspaces/${workspaceId}/claim-passports/${passportId}/versions/${versionId}/sources`,
     )
       .then((items) => {
-        if (active) setSources(items)
+        if (active) {
+          setSources(items)
+          setLoadError('')
+          setLoadedKey(effectRequestKey)
+        }
       })
       .catch((reason: unknown) => {
-        if (active) setError(getErrorMessage(reason))
-      })
-      .finally(() => {
-        if (active) setLoading(false)
+        if (active) {
+          setLoadError(getErrorMessage(reason))
+          setLoadedKey(effectRequestKey)
+        }
       })
 
     return () => {
       active = false
     }
-  }, [workspaceId, passportId, versionId])
+  }, [workspaceId, passportId, versionId, retryKey])
 
   async function downloadSource(source: ClaimPassportVersionSourceRecord) {
     setDownloadingId(source.id)
-    setError('')
+    setActionError('')
     try {
       const blob = await apiRequestFile(
         `/api/v1/workspaces/${workspaceId}/source-documents/${source.source_document_id}/file`,
@@ -136,19 +145,30 @@ export function PassportSourceLinks({
         filenameFromTitle(source.source_document_title_snapshot, blob),
       )
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      setActionError(getErrorMessage(reason))
     } finally {
       setDownloadingId(null)
     }
   }
 
   if (loading) return <div className="cpet-inline-state"><LoaderCircle className="cpet-spinner" size={14} /> Loading document provenance…</div>
-  if (error) return <div className="cpet-inline-error" role="alert"><AlertCircle size={14} />{error}</div>
+  if (loadError) {
+    return (
+      <div className="cpet-inline-error" role="alert">
+        <AlertCircle size={14} />
+        <span>{loadError}</span>
+        <button type="button" onClick={() => setRetryKey((value) => value + 1)} disabled={loading}>
+          <RefreshCw size={13} /> Retry provenance
+        </button>
+      </div>
+    )
+  }
   if (sources.length === 0) return null
 
   return (
     <div className="cpet-source-links">
       <div className="cpet-source-links-heading"><BookOpenText size={14} /><strong>Verified document provenance</strong></div>
+      {actionError && <div className="cpet-inline-error" role="alert"><AlertCircle size={14} />{actionError}</div>}
       {sources.map((source) => (
         <div className="cpet-source-link-card" key={source.id}>
           <div>
@@ -275,6 +295,7 @@ export function PassportReverificationPanel({
   const [reminders, setReminders] = useState<PassportReverificationReminder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -297,7 +318,7 @@ export function PassportReverificationPanel({
     return () => {
       active = false
     }
-  }, [workspaceId, refreshKey])
+  }, [workspaceId, refreshKey, retryKey])
 
   return (
     <section className="cpet-reminders" aria-labelledby="cpet-reminders-title">
@@ -314,7 +335,20 @@ export function PassportReverificationPanel({
       {loading ? (
         <div className="cpet-inline-state"><LoaderCircle className="cpet-spinner" size={17} /> Loading reminders…</div>
       ) : error ? (
-        <div className="cpet-inline-error" role="alert"><AlertCircle size={16} />{error}</div>
+        <div className="cpet-inline-error" role="alert">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true)
+              setRetryKey((current) => current + 1)
+            }}
+            disabled={loading}
+          >
+            <RefreshCw size={13} /> Retry
+          </button>
+        </div>
       ) : reminders.length === 0 ? (
         <div className="cpet-empty-reminders"><CheckCircle2 size={17} /> No active Passports need re-verification in the next 30 days.</div>
       ) : (
@@ -347,13 +381,20 @@ export function SourceDocumentEvidencePicker({
 }: SourceDocumentEvidencePickerProps) {
   const [documents, setDocuments] = useState<SourceDocumentRecord[]>([])
   const [segments, setSegments] = useState<Record<string, SourceDocumentSegmentRecord[]>>({})
+  const [hasMoreSegments, setHasMoreSegments] = useState<Record<string, boolean>>({})
+  const [segmentErrors, setSegmentErrors] = useState<Record<string, string>>({})
+  const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({})
   const [expandedDocumentId, setExpandedDocumentId] = useState<string | null>(null)
   const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null)
   const [refreshingDocuments, setRefreshingDocuments] = useState(false)
   const [loadingSegments, setLoadingSegments] = useState<string | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const segmentRequestLock = useRef(new Set<string>())
+  const downloadRequestLock = useRef(new Set<string>())
+  const uploadRequestLock = useRef(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
-  const [loadError, setLoadError] = useState('')
+  const [documentListError, setDocumentListError] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [fileInputKey, setFileInputKey] = useState(0)
   const [documentTitle, setDocumentTitle] = useState('')
@@ -363,13 +404,13 @@ export function SourceDocumentEvidencePicker({
 
   async function loadDocuments() {
     setRefreshingDocuments(true)
-    setLoadError('')
+    setDocumentListError('')
     try {
       const result = await fetchSourceDocuments(workspaceId)
       setDocuments(result)
       setLoadedWorkspaceId(workspaceId)
     } catch (error) {
-      setLoadError(getErrorMessage(error))
+      setDocumentListError(getErrorMessage(error))
       setLoadedWorkspaceId(workspaceId)
     } finally {
       setRefreshingDocuments(false)
@@ -383,7 +424,7 @@ export function SourceDocumentEvidencePicker({
       .then((result) => {
         if (!active) return
         setDocuments(result)
-        setLoadError('')
+        setDocumentListError('')
         setLoadedWorkspaceId(workspaceId)
       })
       .catch((error: unknown) => {
@@ -391,7 +432,7 @@ export function SourceDocumentEvidencePicker({
         setDocuments([])
         setSegments({})
         setExpandedDocumentId(null)
-        setLoadError(getErrorMessage(error))
+        setDocumentListError(getErrorMessage(error))
         setLoadedWorkspaceId(workspaceId)
       })
 
@@ -410,6 +451,7 @@ export function SourceDocumentEvidencePicker({
   }
 
   async function uploadDocument() {
+    if (uploadRequestLock.current) return
     setUploadError('')
     setSuccessMessage('')
 
@@ -428,6 +470,7 @@ export function SourceDocumentEvidencePicker({
       return
     }
 
+    uploadRequestLock.current = true
     setUploading(true)
     try {
       const form = new FormData()
@@ -448,21 +491,36 @@ export function SourceDocumentEvidencePicker({
     } catch (error) {
       setUploadError(getErrorMessage(error))
     } finally {
+      uploadRequestLock.current = false
       setUploading(false)
     }
   }
 
-  async function loadSegments(documentId: string) {
+  async function loadSegments(documentId: string, append = false) {
+    if (segmentRequestLock.current.has(documentId)) return
+    segmentRequestLock.current.add(documentId)
     setLoadingSegments(documentId)
-    setLoadError('')
+    setSegmentErrors((current) => ({ ...current, [documentId]: '' }))
+
+    const existing = segments[documentId] ?? []
+    const offset = append ? existing.length : 0
+
     try {
       const result = await apiRequest<SourceDocumentSegmentRecord[]>(
-        `/api/v1/workspaces/${workspaceId}/source-documents/${documentId}/segments?limit=100&offset=0`,
+        `/api/v1/workspaces/${workspaceId}/source-documents/${documentId}/segments?limit=100&offset=${offset}`,
       )
-      setSegments((current) => ({ ...current, [documentId]: result }))
+      setSegments((current) => {
+        const currentItems = append ? (current[documentId] ?? []) : []
+        const knownIds = new Set(currentItems.map((item) => item.id))
+        const incoming = result.filter((item) => !knownIds.has(item.id))
+        return { ...current, [documentId]: [...currentItems, ...incoming] }
+      })
+      setHasMoreSegments((current) => ({ ...current, [documentId]: result.length === 100 }))
+      setSegmentErrors((current) => ({ ...current, [documentId]: '' }))
     } catch (error) {
-      setLoadError(getErrorMessage(error))
+      setSegmentErrors((current) => ({ ...current, [documentId]: getErrorMessage(error) }))
     } finally {
+      segmentRequestLock.current.delete(documentId)
       setLoadingSegments((current) => current === documentId ? null : current)
     }
   }
@@ -473,18 +531,24 @@ export function SourceDocumentEvidencePicker({
       return
     }
     setExpandedDocumentId(documentId)
-    if (!segments[documentId]) await loadSegments(documentId)
+    if (!segments[documentId] && !segmentErrors[documentId]) await loadSegments(documentId)
   }
 
   async function downloadDocument(documentRecord: SourceDocumentRecord) {
-    setLoadError('')
+    if (downloadRequestLock.current.size > 0 || downloadRequestLock.current.has(documentRecord.id)) return
+    downloadRequestLock.current.add(documentRecord.id)
+    setDownloadingId(documentRecord.id)
+    setDownloadErrors((current) => ({ ...current, [documentRecord.id]: '' }))
     try {
       const blob = await apiRequestFile(
         `/api/v1/workspaces/${workspaceId}/source-documents/${documentRecord.id}/file`,
       )
       triggerBlobDownload(blob, documentRecord.original_filename)
     } catch (error) {
-      setLoadError(getErrorMessage(error))
+      setDownloadErrors((current) => ({ ...current, [documentRecord.id]: getErrorMessage(error) }))
+    } finally {
+      downloadRequestLock.current.delete(documentRecord.id)
+      setDownloadingId(null)
     }
   }
 
@@ -545,7 +609,7 @@ export function SourceDocumentEvidencePicker({
       </div>
 
       {successMessage && <div className="cpet-inline-success" role="status"><CheckCircle2 size={15} />{successMessage}</div>}
-      {loadError && <div className="cpet-inline-error" role="alert"><AlertCircle size={15} />{loadError}<button type="button" onClick={() => void loadDocuments()}><RefreshCw size={13} /> Retry list</button></div>}
+      {documentListError && <div className="cpet-inline-error" role="alert"><AlertCircle size={15} />{documentListError}<button type="button" onClick={() => void loadDocuments()} disabled={refreshingDocuments}><RefreshCw size={13} /> Retry document list</button></div>}
 
       <div className="cpet-documents-heading">
         <strong>Workspace source documents</strong>
@@ -577,7 +641,7 @@ export function SourceDocumentEvidencePicker({
                     <small>{documentRecord.segment_count} extracted passages · Uploaded {formatDate(documentRecord.created_at)}</small>
                   </div>
                   <div className="cpet-document-actions">
-                    <button type="button" className="cpet-icon-button" title="Download original document" aria-label={`Download ${documentRecord.original_filename}`} onClick={() => void downloadDocument(documentRecord)}>
+                    <button type="button" className="cpet-icon-button" title="Download original document" aria-label={`Download ${documentRecord.original_filename}`} onClick={() => void downloadDocument(documentRecord)} disabled={downloadingId !== null}>
                       <ArrowDownToLine size={15} />
                     </button>
                     <button type="button" className="cpet-text-button" onClick={() => void toggleDocument(documentRecord.id)}>
@@ -589,31 +653,57 @@ export function SourceDocumentEvidencePicker({
                 {documentRecord.extraction_warnings.length > 0 && (
                   <div className="cpet-document-warning"><AlertCircle size={14} />{documentRecord.extraction_warnings.join(' ')}</div>
                 )}
+                {downloadErrors[documentRecord.id] && (
+                  <div className="cpet-inline-error" role="alert">
+                    <AlertCircle size={14} />
+                    <span>{downloadErrors[documentRecord.id]}</span>
+                    <button type="button" onClick={() => void downloadDocument(documentRecord)} disabled={downloadingId !== null}>
+                      <RefreshCw size={13} /> Retry download
+                    </button>
+                  </div>
+                )}
                 {expanded && (
                   <div className="cpet-segments">
-                    {loadingSegments === documentRecord.id ? (
+                    {loadingSegments === documentRecord.id && !(segments[documentRecord.id] ?? []).length ? (
                       <div className="cpet-inline-state"><LoaderCircle className="cpet-spinner" size={15} /> Loading extracted passages…</div>
-                    ) : (segments[documentRecord.id] ?? []).length === 0 ? (
-                      <p className="cpet-no-segments">No extracted passages were returned for this document.</p>
-                    ) : (
-                      (segments[documentRecord.id] ?? []).map((segment) => {
-                        const selected = selectedSegmentId === segment.id
-                        return (
-                          <article className={`cpet-segment-card ${selected ? 'is-selected' : ''}`} key={segment.id}>
-                            <div className="cpet-segment-heading">
-                              <span>{segment.location_label}</span>
-                              {selected && <span className="cpet-selected-label"><CheckCircle2 size={12} /> Selected</span>}
-                            </div>
-                            <p>{segment.text_content}</p>
-                            <div className="cpet-segment-footer">
-                              <small>Passage {segment.segment_index} · {segment.text_content.length > 10000 ? 'First 10,000 characters can be attached; refine the excerpt if needed.' : `${segment.text_content.length.toLocaleString('en-IN')} characters`}</small>
-                              <button type="button" className="cp-button cp-button-secondary" onClick={() => selectSegment(documentRecord, segment)}>
-                                <Check size={14} /> Use this passage
-                              </button>
-                            </div>
-                          </article>
-                        )
-                      })
+                    ) : null}
+                    {segmentErrors[documentRecord.id] && (
+                      <div className="cpet-inline-error" role="alert">
+                        <AlertCircle size={14} />
+                        <span>{segmentErrors[documentRecord.id]}</span>
+                        <button type="button" onClick={() => void loadSegments(documentRecord.id, (segments[documentRecord.id] ?? []).length > 0)} disabled={loadingSegments === documentRecord.id}>
+                          <RefreshCw size={13} /> Retry passages
+                        </button>
+                      </div>
+                    )}
+                    {(segments[documentRecord.id] ?? []).map((segment) => {
+                      const selected = selectedSegmentId === segment.id
+                      return (
+                        <article className={`cpet-segment-card ${selected ? 'is-selected' : ''}`} key={segment.id}>
+                          <div className="cpet-segment-heading">
+                            <span>{segment.location_label}</span>
+                            {selected && <span className="cpet-selected-label"><CheckCircle2 size={12} /> Selected</span>}
+                          </div>
+                          <p>{segment.text_content}</p>
+                          <div className="cpet-segment-footer">
+                            <small>Passage {segment.segment_index} · {segment.text_content.length > 10000 ? 'First 10,000 characters can be attached; refine the excerpt if needed.' : `${segment.text_content.length.toLocaleString('en-IN')} characters`}</small>
+                            <button type="button" className="cp-button cp-button-secondary" onClick={() => selectSegment(documentRecord, segment)}>
+                              <Check size={14} /> Use this passage
+                            </button>
+                          </div>
+                        </article>
+                      )
+                    })}
+                    {!segmentErrors[documentRecord.id] && !loadingSegments && (segments[documentRecord.id] ?? []).length === 0 && (
+                      <p className="cpet-no-segments">No extracted passages were returned for this document. Check its extraction warnings or upload a text-readable source.</p>
+                    )}
+                    {hasMoreSegments[documentRecord.id] && (
+                      <div className="cpet-load-more-wrap">
+                        <button type="button" className="cpet-text-button" onClick={() => void loadSegments(documentRecord.id, true)} disabled={loadingSegments === documentRecord.id}>
+                          {loadingSegments === documentRecord.id ? <LoaderCircle className="cpet-spinner" size={13} /> : <ChevronDown size={13} />}
+                          {loadingSegments === documentRecord.id ? 'Loading more passages…' : `Load more passages (${(segments[documentRecord.id] ?? []).length} loaded)`}
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}

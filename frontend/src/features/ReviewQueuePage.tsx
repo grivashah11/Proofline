@@ -46,7 +46,6 @@ import {
 import type { WorkspaceRole } from '../lib/workspaces'
 import { useAuth } from '../lib/auth-context'
 import ClaimMatchConfidence from './ClaimMatchConfidence'
-import GovernanceInsightsPanel from './GovernanceInsightsPanel'
 import { FindingLifecyclePanel, RevisionDiffPanel, ReviewDecisionContext } from './ReviewGovernancePanels'
 import './WorkflowPages.css'
 
@@ -64,7 +63,6 @@ function getErrorMessage(error: unknown) {
 
 export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const { user } = useAuth()
-  const [activeView, setActiveView] = useState<'queue' | 'insights'>('queue')
   const [queue, setQueue] = useState<ContentRecord[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [detail, setDetail] = useState<ContentDetail | null>(null)
@@ -307,23 +305,6 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
     )
   }
 
-  if (activeView === 'insights') {
-    return (
-      <div className="workflow-page">
-        <header className="workflow-header">
-          <div>
-            <p className="eyebrow">BRAND OWNER WORKSPACE</p>
-            <h1>Governance insights</h1>
-            <p className="workflow-subtitle">Spot repeated issues, review finding resolution and identify where brand guidance or evidence may need attention.</p>
-          </div>
-          <button className="button button-secondary" type="button" onClick={() => setActiveView('queue')}>
-            Back to review queue
-          </button>
-        </header>
-        <GovernanceInsightsPanel workspaceId={workspaceId} />
-      </div>
-    )
-  }
 
   const hasCurrentAnalysis = Boolean(analysis && currentRevision && analysis.analysis.revision_id === currentRevision.id)
   const decisionDisabled = !detail || detail.content.status !== 'in_review' || !hasCurrentAnalysis || busy !== ''
@@ -333,7 +314,7 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
       <header className="workflow-header">
         <div><p className="eyebrow">BRAND OWNER WORKSPACE</p><h1>Review queue</h1><p className="workflow-subtitle">Inspect the saved revision, read its evidence-linked findings and record an accountable human decision.</p></div>
         <div className="review-queue-header-actions">
-          <button className="button button-secondary" type="button" onClick={() => setActiveView('insights')}><History size={15} /> Governance insights</button>
+          <Link className="button button-secondary" to="/governance"><History size={15} /> Governance insights</Link>
           <button className="button button-secondary" type="button" onClick={() => void refreshQueue()}><RefreshCw size={15} /> Refresh queue</button>
         </div>
       </header>

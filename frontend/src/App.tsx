@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   Activity,
   ArrowRight,
   ArrowLeft,
   ArrowUpRight,
   BadgeCheck,
+  BarChart3,
   BookOpenCheck,
   CheckCircle2,
   Clipboard,
@@ -37,12 +38,6 @@ import {
 import { ApiError, apiRequest } from './lib/api'
 import { listContents, statusLabel, type ContentRecord } from './lib/content'
 import { AuthProvider } from './lib/auth'
-import BrandKnowledgePage from './features/BrandKnowledgePage'
-import ClaimPassportsPage from './features/ClaimPassportsPage'
-import ContentReviewsPage from './features/ContentReviewsPage'
-import ReviewQueuePage from './features/ReviewQueuePage'
-import TeamPage from './features/TeamPage'
-import ImagesPage from './features/ImagesPage'
 import GettingStarted from './features/GettingStarted'
 import { useAuth } from './lib/auth-context'
 import {
@@ -56,6 +51,16 @@ import {
 } from './lib/workspaces'
 import './App.css'
 import './Auth.css'
+import './JudgeUsability.css'
+
+const BrandKnowledgePage = lazy(() => import('./features/BrandKnowledgePage'))
+const ClaimPassportsPage = lazy(() => import('./features/ClaimPassportsPage'))
+const ContentReviewsPage = lazy(() => import('./features/ContentReviewsPage'))
+const ReviewQueuePage = lazy(() => import('./features/ReviewQueuePage'))
+const TeamPage = lazy(() => import('./features/TeamPage'))
+const ImagesPage = lazy(() => import('./features/ImagesPage'))
+const GovernanceInsightsPage = lazy(() => import('./features/GovernanceInsightsPage'))
+
 
 type ApiState = 'checking' | 'online' | 'offline'
 
@@ -63,54 +68,26 @@ type NavItem = {
   label: string
   to: string
   icon: LucideIcon
+  group: 'start' | 'setup' | 'review' | 'manage'
 }
 
 const navItems: NavItem[] = [
-  { label: 'Overview', to: '/', icon: LayoutDashboard },
-  { label: 'Brand rules', to: '/brand-rules', icon: BookOpenCheck },
-  { label: 'Terminology', to: '/terminology', icon: MessageSquareText },
-  { label: 'Claim Passports', to: '/claim-passports', icon: BadgeCheck },
-  { label: 'Content reviews', to: '/content', icon: FileCheck2 },
-  { label: 'Review queue', to: '/reviews', icon: UsersRound },
-  { label: 'Team members', to: '/team', icon: UsersRound },
-  { label: 'Images & assets', to: '/images', icon: ImageIcon },
+  { label: 'Overview', to: '/', icon: LayoutDashboard, group: 'start' },
+  { label: 'Brand rules', to: '/brand-rules', icon: BookOpenCheck, group: 'setup' },
+  { label: 'Terminology', to: '/terminology', icon: MessageSquareText, group: 'setup' },
+  { label: 'Claim Passports', to: '/claim-passports', icon: BadgeCheck, group: 'setup' },
+  { label: 'Content reviews', to: '/content', icon: FileCheck2, group: 'review' },
+  { label: 'Review queue', to: '/reviews', icon: UsersRound, group: 'review' },
+  { label: 'Governance insights', to: '/governance', icon: BarChart3, group: 'review' },
+  { label: 'Team members', to: '/team', icon: UsersRound, group: 'manage' },
+  { label: 'Images & assets', to: '/images', icon: ImageIcon, group: 'manage' },
 ]
 
-const quickLinks: {
-  number: string
-  title: string
-  description: string
-  to: string
-  action: string
-  icon: LucideIcon
-}[] = [
-  {
-    number: '01',
-    title: 'Set brand rules',
-    description:
-      'Define the messaging, tone and terminology your team should follow.',
-    to: '/brand-rules',
-    action: 'Set up brand knowledge',
-    icon: BookOpenCheck,
-  },
-  {
-    number: '02',
-    title: 'Verify important claims',
-    description:
-      'Create evidence-backed Claim Passports for your products.',
-    to: '/claim-passports',
-    action: 'Manage Claim Passports',
-    icon: BadgeCheck,
-  },
-  {
-    number: '03',
-    title: 'Review content',
-    description:
-      'Check a draft and resolve findings before it reaches a reviewer.',
-    to: '/content',
-    action: 'Start a content review',
-    icon: FileCheck2,
-  },
+const navGroups: { key: NavItem['group']; label: string }[] = [
+  { key: 'start', label: 'START HERE' },
+  { key: 'setup', label: 'BRAND SETUP' },
+  { key: 'review', label: 'REVIEW WORKFLOW' },
+  { key: 'manage', label: 'TEAM & ASSETS' },
 ]
 
 function App() {
@@ -140,6 +117,15 @@ function LoadingScreen({ label }: { label: string }) {
       </div>
       <LoaderCircle className="spin-icon" size={19} />
       <p>{label}</p>
+    </div>
+  )
+}
+
+function RouteLoadingFallback() {
+  return (
+    <div className="route-loading-state" role="status" aria-live="polite">
+      <LoaderCircle className="spin-icon" size={22} />
+      <span>Loading this section…</span>
     </div>
   )
 }
@@ -280,8 +266,8 @@ function AuthScreen() {
                 </h2>
                 <p>
                   {mode === 'login'
-                    ? 'Pick up where your brand left off.'
-                    : 'Start building a more trustworthy brand.'}
+                    ? 'First time here? Create an account, choose Brand Owner and set up a workspace. A Creator can join from a separate account.'
+                    : 'Create an account to set up a brand workspace or join one as a Creator.'}
                 </p>
               </div>
 
@@ -1018,40 +1004,51 @@ function AppLayout({
         </div>
 
         <nav className="sidebar-nav" aria-label="Main navigation">
-          <p className="nav-heading">WORKSPACE</p>
-          {navItems.filter((item) => item.to !== '/reviews' || selected.role === 'brand_owner').map((item) => {
-            const Icon = item.icon
-            const isActive =
-              item.to === '/'
-                ? location.pathname === '/'
-                : location.pathname.startsWith(item.to)
+          {navGroups.map((group) => {
+            const items = navItems.filter((item) =>
+              item.group === group.key &&
+              (!['/reviews', '/governance'].includes(item.to) || selected.role === 'brand_owner'),
+            )
+
+            if (items.length === 0) return null
 
             return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={`nav-link ${isActive ? 'nav-link--active' : ''}`}
-                aria-current={isActive ? 'page' : undefined}
-                onClick={() => setMobileNavOpen(false)}
-              >
-                <Icon size={18} strokeWidth={1.85} />
-                <span>{item.label}</span>
-                {isActive && <span className="nav-active-dot" />}
-              </Link>
+              <section className="sidebar-nav-group" key={group.key}>
+                <p className="nav-heading">{group.label}</p>
+                {items.map((item) => {
+                  const Icon = item.icon
+                  const isActive = item.to === '/'
+                    ? location.pathname === '/'
+                    : location.pathname.startsWith(item.to)
+
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      className={`nav-link ${isActive ? 'nav-link--active' : ''}`}
+                      aria-current={isActive ? 'page' : undefined}
+                      onClick={() => setMobileNavOpen(false)}
+                    >
+                      <Icon size={18} strokeWidth={1.85} />
+                      <span>{item.label}</span>
+                      {isActive && <span className="nav-active-dot" />}
+                    </Link>
+                  )
+                })}
+              </section>
             )
           })}
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-help-icon">
-            <Sparkles size={17} />
+          <div className="sidebar-principle">
+            <ShieldCheck size={17} />
+            <div>
+              <strong>AI assists. People decide.</strong>
+              <p>Evidence informs the review. An authorised person makes the decision.</p>
+            </div>
           </div>
-          <strong>Publish with confidence.</strong>
-          <p>
-            Keep your brand voice consistent and every important claim
-            traceable.
-          </p>
-          <div className="sidebar-version">PROOFLINE · ROUND 2</div>
+          <div className="sidebar-version">PROOFLINE · ROUND 3</div>
         </div>
       </aside>
 
@@ -1111,41 +1108,47 @@ function AppLayout({
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
             >
-              <Routes location={location}>
-                <Route
-                  path="/"
-                  element={<DashboardPage workspace={selected.workspace} role={selected.role} />}
-                />
-                <Route
-                  path="/brand-rules"
-                  element={<BrandKnowledgePage section="brandRules" workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route
-                  path="/terminology"
-                  element={<BrandKnowledgePage section="terminology" workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route
-                  path="/claim-passports"
-                  element={<ClaimPassportsPage workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route
-                  path="/content"
-                  element={<ContentReviewsPage workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route
-                  path="/reviews"
-                  element={<ReviewQueuePage workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route
-                  path="/team"
-                  element={<TeamPage workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route
-                  path="/images"
-                  element={<ImagesPage workspaceId={selected.workspace.id} role={selected.role} />}
-                />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <Routes location={location}>
+                  <Route
+                    path="/"
+                    element={<DashboardPage workspace={selected.workspace} role={selected.role} />}
+                  />
+                  <Route
+                    path="/brand-rules"
+                    element={<BrandKnowledgePage section="brandRules" workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/terminology"
+                    element={<BrandKnowledgePage section="terminology" workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/claim-passports"
+                    element={<ClaimPassportsPage workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/content"
+                    element={<ContentReviewsPage workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/reviews"
+                    element={<ReviewQueuePage workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/governance"
+                    element={<GovernanceInsightsPage workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/team"
+                    element={<TeamPage workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route
+                    path="/images"
+                    element={<ImagesPage workspaceId={selected.workspace.id} role={selected.role} />}
+                  />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              </Suspense>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -1199,99 +1202,65 @@ function DashboardPage({ workspace, role }: { workspace: WorkspaceRecord; role: 
       <section className="welcome-row">
         <div>
           <p className="eyebrow">YOUR BRAND WORKSPACE</p>
-          <h1>Your brand, in check.</h1>
+          <h1>Welcome to {workspace.name}</h1>
           <p className="welcome-description">
-            Keep every claim traceable and every message on-brand.
-            Review content with confidence before it gets published.
+            {role === 'brand_owner'
+              ? 'Start with brand rules and approved claims, then invite a Creator and review their draft.'
+              : 'Submit a draft, review the findings, make corrections and send your revision to the Brand Owner.'}
           </p>
         </div>
-        <Link className="button button-primary welcome-button" to="/content">
-          <Sparkles size={17} />
-          Start a content review
-          <ArrowUpRight size={17} />
-        </Link>
+        {role === 'brand_owner' ? (
+          <a className="button button-primary welcome-button" href="#getting-started-panel">
+            <Sparkles size={17} />
+            Follow setup steps
+            <ArrowRight size={17} />
+          </a>
+        ) : (
+          <Link className="button button-primary welcome-button" to="/content">
+            <FileCheck2 size={17} />
+            Submit content
+            <ArrowRight size={17} />
+          </Link>
+        )}
       </section>
 
       <GettingStarted workspaceId={workspace.id} role={role} />
 
-      <section className="hero-panel">
-        <div className="hero-glow hero-glow-one" />
-        <div className="hero-glow hero-glow-two" />
-        <div className="hero-content">
-          <div className="hero-label">
-            <span className="hero-label-dot" />
-            PRE-PUBLICATION CONTENT CHECK
+      <details className="workflow-overview-panel">
+        <summary className="workflow-overview-summary">
+          <span>
+            <span className="eyebrow">HOW PROOFLINE WORKS</span>
+            <strong>See the three-step review journey</strong>
+            <small>Brand setup → content checks → human decision</small>
+          </span>
+          <span className="workflow-overview-summary-action">
+            <span>View steps</span>
+            <ChevronDown size={17} />
+          </span>
+        </summary>
+        <div className="workflow-overview-content">
+          <div className="workflow-overview-heading">
+            <div>
+              <h2 id="workflow-overview-title">One clear path from draft to decision</h2>
+            </div>
+            <p>Evidence stays visible. People stay in control.</p>
           </div>
-          <h2>
-            Publish with proof.
-            <br />
-            <span>Not guesswork.</span>
-          </h2>
-          <p>
-            Proofline brings brand rules, verified claims and human
-            approvals into one simple workflow.
-          </p>
-          <div className="hero-actions">
-            <Link className="button button-light" to="/content">
-              Review content <ArrowRight size={17} />
-            </Link>
-            <Link className="hero-text-link" to="/brand-rules">
-              Set up brand knowledge <ArrowUpRight size={16} />
-            </Link>
-          </div>
-        </div>
-
-        <div className="hero-visual" aria-hidden="true">
-          <div className="visual-orbit orbit-one" />
-          <div className="visual-orbit orbit-two" />
-          <div className="visual-core">
-            <ShieldCheck size={54} strokeWidth={1.45} />
-          </div>
-          <div className="visual-chip visual-chip-top">
-            <CheckCircle2 size={15} />
-            <span>Evidence linked</span>
-          </div>
-          <div className="visual-chip visual-chip-bottom">
-            <BadgeCheck size={15} />
-            <span>Human approved</span>
+          <div className="workflow-overview-steps">
+            <div className="workflow-overview-step">
+              <span className="workflow-overview-number">1</span>
+              <div><strong>Prepare the brand</strong><small>Set brand rules, terminology and approved Claim Passports.</small></div>
+            </div>
+            <div className="workflow-overview-step">
+              <span className="workflow-overview-number">2</span>
+              <div><strong>Check a draft</strong><small>Submit content and review evidence-linked findings and suggestions.</small></div>
+            </div>
+            <div className="workflow-overview-step">
+              <span className="workflow-overview-number">3</span>
+              <div><strong>Review and decide</strong><small>An authorised Brand Owner reviews the exact submitted revision.</small></div>
+            </div>
           </div>
         </div>
-      </section>
-
-      <section className="section-heading">
-        <div>
-          <p className="eyebrow">EXPLORE PROOFLINE</p>
-          <h2>More ways to manage your brand.</h2>
-        </div>
-        <span className="section-caption">A clear path from draft to approval</span>
-      </section>
-
-      <section className="quick-grid">
-        {quickLinks.map((item) => {
-          const Icon = item.icon
-
-          return (
-            <motion.div
-              key={item.number}
-              className="quick-card"
-              whileHover={{ y: -4 }}
-              transition={{ duration: 0.18 }}
-            >
-              <div className="quick-card-top">
-                <span className="step-number">{item.number}</span>
-                <span className="quick-card-icon">
-                  <Icon size={19} />
-                </span>
-              </div>
-              <h3>{item.title}</h3>
-              <p>{item.description}</p>
-              <Link className="card-link" to={item.to}>
-                {item.action} <ArrowUpRight size={16} />
-              </Link>
-            </motion.div>
-          )
-        })}
-      </section>
+      </details>
 
       <section className="bottom-grid">
         <div className="recent-panel">
