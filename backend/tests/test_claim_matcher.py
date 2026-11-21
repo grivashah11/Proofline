@@ -809,10 +809,13 @@ def test_observed_continuous_playback_hours_phrase_matches_with_full_conditions(
         channel_scope="Website",
         market_scope="India",
     )
+    # Exact heading and technical conditions from the production Passport.
+    # Extraction returns the same requirements without the section label.
     version["required_conditions"] = (
-        "Continuous Bluetooth audio playback using AAC codec at 50% volume; "
-        "Active Noise Cancellation (ANC) turned off; standard firmware; "
-        "ambient temperature of 23 ± 2°C; testing starts with a fully charged battery."
+        "Demo test conditions: Continuous Bluetooth audio playback using AAC codec "
+        "at 50% volume, Active Noise Cancellation (ANC) turned off, standard firmware "
+        "and ambient temperature of 23 ± 2°C. Testing starts with a fully charged "
+        "battery and continues until playback stops."
     )
 
     assessment = run_match(
@@ -827,6 +830,32 @@ def test_observed_continuous_playback_hours_phrase_matches_with_full_conditions(
     assert factors["subject"].matched is True
     assert factors["attribute"].matched is True
     assert factors["conditions"].matched is True
+
+
+def test_demo_test_conditions_heading_does_not_hide_missing_aac_requirement():
+    full_conditions = (
+        "Continuous Bluetooth audio playback using AAC codec at 50% volume, "
+        "Active Noise Cancellation (ANC) turned off, standard firmware and "
+        "ambient temperature of 23 ± 2°C. Testing starts with a fully charged "
+        "battery and continues until playback stops."
+    )
+    incomplete_conditions = full_conditions.replace("using AAC codec ", "")
+    content, claim, passport, version = _northstar_extracted_variant_case(
+        conditions=incomplete_conditions
+    )
+    version["required_conditions"] = "Demo test conditions: " + full_conditions
+
+    assessment = run_match(
+        content, claim, passport, version, channel="Website", market="India",
+    )
+
+    assert assessment.status == PassportMatchStatus.NEEDS_VERIFICATION
+    assert assessment.passport_code == "PFL-TEST-001"
+    condition_factor = next(
+        factor for factor in assessment.confidence_factors
+        if factor.name == "conditions"
+    )
+    assert condition_factor.matched is False
 
 
 def test_actual_extracted_variant_subject_still_detects_numeric_conflict():

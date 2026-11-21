@@ -192,6 +192,25 @@ def subject_model_years(*values: str | None) -> set[str]:
     return years
 
 
+def _strip_condition_heading(value: str | None) -> str:
+    """Remove only a leading, explicitly labelled conditions heading.
+
+    Passport records may store a section label such as ``Demo test conditions:``
+    before the actual test requirements, while extraction stores only the
+    requirement text. Strip that label only when it appears at the beginning
+    and is followed by a colon; never remove substantive condition wording.
+    """
+    if value is None:
+        return ""
+    return re.sub(
+        r"^\s*(?:demo\s+)?test\s+conditions\s*:\s*",
+        "",
+        value,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
 def normalize_condition_text(value: str | None) -> str:
     if value is None:
         return ""
@@ -209,8 +228,8 @@ def required_conditions_are_present(
     required_conditions: str | None,
     extracted_conditions: str | None,
 ) -> bool:
-    required = (required_conditions or "").strip()
-    extracted = normalize_condition_text(extracted_conditions)
+    required = _strip_condition_heading(required_conditions).strip()
+    extracted = normalize_condition_text(_strip_condition_heading(extracted_conditions))
     if not required:
         return True
     if not extracted:
