@@ -64,6 +64,7 @@ class WorkspaceMemberRecord(BaseModel):
     role: WorkspaceRole
     invited_by: UUID | None = None
     joined_at: datetime
+    display_name: str | None = None
 
 
 class WorkspaceMemberCreate(BaseModel):
@@ -73,3 +74,15 @@ class WorkspaceMemberCreate(BaseModel):
 
 class WorkspaceMemberRoleUpdate(BaseModel):
     role: WorkspaceRole
+
+
+class WorkspaceMemberDisplayNameUpdate(BaseModel):
+    display_name: str = Field(min_length=2, max_length=80)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) < 2:
+            raise ValueError("Display name must contain at least 2 characters.")
+        return normalized

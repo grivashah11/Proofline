@@ -11,6 +11,7 @@ from app.schemas.workspaces import (
     WorkspaceCreate,
     WorkspaceListItem,
     WorkspaceMemberCreate,
+    WorkspaceMemberDisplayNameUpdate,
     WorkspaceMemberRecord,
     WorkspaceMemberRoleUpdate,
     WorkspaceRecord,
@@ -179,7 +180,7 @@ async def list_workspace_members(
         "GET",
         "workspace_members",
         params={
-            "select": ("workspace_id,user_id,role,invited_by,joined_at"),
+            "select": ("workspace_id,user_id,role,invited_by,joined_at,display_name"),
             "workspace_id": f"eq.{workspace_id}",
             "order": "joined_at.asc",
         },
@@ -269,6 +270,41 @@ async def update_workspace_member_role(
         payload={
             "role": data.role.value,
         },
+        prefer="return=representation",
+    )
+
+    if not records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace member not found.",
+        )
+
+    return WorkspaceMemberRecord.model_validate(records[0])
+
+
+@router.patch(
+    "/{workspace_id}/members/{user_id}/display-name",
+    response_model=WorkspaceMemberRecord,
+    summary="Set a workspace member's display name",
+)
+async def update_workspace_member_display_name(
+    workspace_id: UUID,
+    user_id: UUID,
+    data: WorkspaceMemberDisplayNameUpdate,
+    auth: AuthContextDependency,
+    gateway: SupabaseGatewayDependency,
+) -> WorkspaceMemberRecord:
+
+    await require_workspace_owner(workspace_id, auth, gateway)
+
+    records = await gateway.request(
+        "PATCH",
+        "workspace_members",
+        params={
+            "workspace_id": f"eq.{workspace_id}",
+            "user_id": f"eq.{user_id}",
+        },
+        payload={"display_name": data.display_name},
         prefer="return=representation",
     )
 

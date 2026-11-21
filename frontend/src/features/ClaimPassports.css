@@ -1417,3 +1417,17 @@
   color: #bbaed0;
   cursor: not-allowed;
 }
+
+
+/* A Passport subject is immutable across versions; explain this beside the field. */
+.cp-wizard-form .cp-locked-field-help {
+  display: block;
+  margin-top: 5px;
+  padding: 9px 11px;
+  border: 1px solid rgba(167, 139, 250, 0.24);
+  border-radius: 8px;
+  background: rgba(139, 92, 246, 0.08);
+  color: #c7b8e4;
+  font-size: 11px;
+  line-height: 1.65;
+}

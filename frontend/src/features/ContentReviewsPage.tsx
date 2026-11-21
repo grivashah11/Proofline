@@ -32,6 +32,7 @@ import {
   listComments,
   listContents,
   listReviewDecisions,
+  listWorkspaceMembers,
   runAnalysis,
   statusLabel,
   outcomeLabel,
@@ -45,6 +46,7 @@ import {
   type ContentRecord,
   type ContentType,
   type ReviewDecisionRecord,
+  type WorkspaceMember,
 } from '../lib/content'
 import type { WorkspaceRole } from '../lib/workspaces'
 import ClaimMatchConfidence from './ClaimMatchConfidence'
@@ -186,6 +188,7 @@ function FindingCard({ finding }: { finding: AnalysisFinding }) {
 export default function ContentReviewsPage({ workspaceId, role }: Props) {
   const { user } = useAuth()
   const [items, setItems] = useState<ContentRecord[]>([])
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [detail, setDetail] = useState<ContentDetail | null>(null)
   const [analysis, setAnalysis] = useState<AnalysisDetail | null>(null)
@@ -205,6 +208,20 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [filter, setFilter] = useState('all')
+
+  useEffect(() => {
+    let active = true
+    listWorkspaceMembers(workspaceId)
+      .then((records) => { if (active) setWorkspaceMembers(records) })
+      .catch(() => { if (active) setWorkspaceMembers([]) })
+    return () => { active = false }
+  }, [workspaceId])
+
+  const memberLabel = useCallback((memberId: string) => {
+    if (memberId === user?.id) return 'You'
+    const match = workspaceMembers.find((member) => member.user_id === memberId)
+    return match?.display_name || `Member ${memberId.slice(0, 8)}`
+  }, [user?.id, workspaceMembers])
 
   const currentRevision = useMemo(() => {
     if (!detail) return null
@@ -464,7 +481,7 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
           </div>
           <div className="workflow-form-grid">
             <label className="workflow-field"><span>Submission title</span><input value={newDraft.title} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, title: event.target.value }))} placeholder="e.g. Hydro Flask summer campaign" maxLength={200} required /></label>
-            <label className="workflow-field"><span>Content type</span><select value={newDraft.content_type} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, content_type: event.target.value as ContentType }))}><option value="social_post">Social post</option><option value="advertisement">Advertisement</option><option value="email">Email</option><option value="document">Document</option><option value="other">Other</option></select></label>
+            <label className="workflow-field"><span>Content type</span><select value={newDraft.content_type} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, content_type: event.target.value as ContentType }))}><option value="social_post">Social post</option><option value="advertisement">Advertisement</option><option value="email">Email</option><option value="document">Document</option><option value="other">Other</option></select><small className="content-type-help">Choose Other for landing pages, website copy, product descriptions, press releases or formats not listed.</small></label>
             <label className="workflow-field"><span>Product / subject context</span><input value={newDraft.product_context} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, product_context: event.target.value }))} placeholder="e.g. Hydro Flask 24 oz Standard Mouth" maxLength={300} /></label>
             <label className="workflow-field"><span>Channel</span><input value={newDraft.channel} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, channel: event.target.value }))} placeholder="e.g. Instagram" maxLength={80} /></label>
             <label className="workflow-field"><span>Market</span><input value={newDraft.market} onChange={(event: { target: { value: string } }) => setNewDraft((current) => ({ ...current, market: event.target.value }))} placeholder="e.g. India" maxLength={100} /></label>
@@ -549,7 +566,7 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
               <section className="workflow-section-block">
                 <div className="workflow-section-heading"><div><p className="eyebrow">DISCUSSION</p><h3>Revision comments</h3></div><span className="revision-tag">{comments.length} COMMENTS</span></div>
                 <p className="workflow-muted-copy">Comments posted here are discussion messages. Formal Brand Owner decisions and their reviewer notes are shown separately in Review history below.</p>
-                {comments.length === 0 ? <p className="workflow-muted-copy">No discussion comments have been added to the current revision yet.</p> : <div className="comment-list">{comments.map((comment) => <article className="comment-item" key={comment.id}><div className="comment-avatar"><MessageSquareText size={14} /></div><div><p>{comment.body}</p><small>{comment.created_by === user?.id ? 'You' : `Member ${comment.created_by.slice(0, 8)}`} · {formatDate(comment.created_at)}</small></div></article>)}</div>}
+                {comments.length === 0 ? <p className="workflow-muted-copy">No discussion comments have been added to the current revision yet.</p> : <div className="comment-list">{comments.map((comment) => <article className="comment-item" key={comment.id}><div className="comment-avatar"><MessageSquareText size={14} /></div><div><p>{comment.body}</p><small>{memberLabel(comment.created_by)} · {formatDate(comment.created_at)}</small></div></article>)}</div>}
                 {currentRevision && <form className="comment-form" onSubmit={handleComment}><input value={commentText} onChange={(event: { target: { value: string } }) => setCommentText(event.target.value)} placeholder="Add a note to this revision..." maxLength={5000} aria-label="Add a comment" /><button className="button button-secondary" type="submit" disabled={!commentText.trim() || busy !== ''}>{busy === 'comment' ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />} Comment</button></form>}
               </section>
 
@@ -585,7 +602,7 @@ export default function ContentReviewsPage({ workspaceId, role }: Props) {
                           <span className="revision-history-number">{decisionMarker}</span>
                           <div>
                             <strong>{decisionTitle}</strong>
-                            <small>{reviewedRevision ? `Revision ${reviewedRevision.revision_number} · ` : ''}{formatDate(decision.created_at)}</small>
+                            <small>{reviewedRevision ? `Revision ${reviewedRevision.revision_number} · ` : ''}Reviewed by {memberLabel(decision.reviewer_id)} · {formatDate(decision.created_at)}</small>
                             {decision.reviewer_comment
                               ? <p className="reviewer-decision-note">{decision.reviewer_comment}</p>
                               : <p className="reviewer-decision-no-note">No reviewer note was provided for this decision.</p>}

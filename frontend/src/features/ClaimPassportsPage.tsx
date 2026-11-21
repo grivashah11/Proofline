@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   AlertCircle,
   BadgeCheck,
@@ -21,6 +21,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
+import WorkflowNextStep from './WorkflowNextStep'
 import { ApiError, apiRequest } from '../lib/api'
 import {
   PassportReverificationPanel,
@@ -261,8 +262,6 @@ export default function ClaimPassportsPage({
   const [loading, setLoading] = useState(true)
   const [pageError, setPageError] = useState('')
   const [actionError, setActionError] = useState('')
-  const [activatingVersionId, setActivatingVersionId] = useState<string | null>(null)
-  const activationLockRef = useRef<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
@@ -579,7 +578,7 @@ export default function ClaimPassportsPage({
   }
 
   async function activateVersion(version: PassportVersionRecord) {
-    if (!selectedPassport || activationLockRef.current) return
+    if (!selectedPassport) return
 
     const confirmed = window.confirm(
       `Activate version ${version.version_number}?\n\nThe backend will verify its evidence and requirements before activation.`,
@@ -587,8 +586,6 @@ export default function ClaimPassportsPage({
 
     if (!confirmed) return
 
-    activationLockRef.current = version.id
-    setActivatingVersionId(version.id)
     setActionError('')
 
     try {
@@ -603,9 +600,6 @@ export default function ClaimPassportsPage({
       setActionError(
         `This version could not be activated: ${errorMessage(error)}`,
       )
-    } finally {
-      activationLockRef.current = null
-      setActivatingVersionId((current) => current === version.id ? null : current)
     }
   }
 
@@ -917,7 +911,7 @@ export default function ClaimPassportsPage({
                 <p className="cp-eyebrow">VERSION HISTORY</p>
                 <h3>Passport versions</h3>
               </div>
-              <span className="cp-total-pill">{versions.length} versions</span>
+              <span className="cp-total-pill">{versions.length} {versions.length === 1 ? 'version' : 'versions'}</span>
             </div>
 
             <div className="cp-version-explainer">
@@ -967,12 +961,9 @@ export default function ClaimPassportsPage({
                           className="cp-button cp-button-primary cp-activate-button"
                           type="button"
                           onClick={() => void activateVersion(version)}
-                          disabled={activatingVersionId !== null}
                         >
-                          {activatingVersionId === version.id
-                            ? <LoaderCircle className="cp-spinner" size={15} />
-                            : <ShieldCheck size={15} />}
-                          {activatingVersionId === version.id ? 'Activating…' : 'Verify & activate'}
+                          <ShieldCheck size={15} />
+                          Verify & activate
                         </button>
                       )}
                     </div>
@@ -1116,6 +1107,13 @@ export default function ClaimPassportsPage({
           </motion.section>
         )}
       </AnimatePresence>
+
+      <WorkflowNextStep
+        title={canEdit ? 'Connect your Creator account' : 'Prepare your first content draft'}
+        description={canEdit ? 'Add an existing Creator from Team Members so they can submit content for review.' : 'Use the active brand guidance and Claim Passports when you prepare your submission.'}
+        action={canEdit ? 'Continue to Team Members' : 'Create a submission'}
+        to={canEdit ? '/team' : '/content'}
+      />
 
       <section className="cp-tip">
         <div className="cp-tip-icon">
@@ -1349,10 +1347,10 @@ export default function ClaimPassportsPage({
                     </label>
 
                     <div className="cp-form-grid">
-                      <label>
-                        Passport subject
-                        <input value={selectedPassport.subject} readOnly />
-                        <small>This stays aligned with the Passport identity. Create a separate Passport for a different product or model.</small>
+                      <label className="cp-passport-subject-field">
+                        Passport subject (fixed identity)
+                        <input value={selectedPassport.subject} readOnly aria-readonly="true" />
+                        <small className="cp-locked-field-help">Locked by design: a Passport represents one specific product or claim subject. To cover a different product or model, close this wizard and create a separate Passport.</small>
                       </label>
                       <label>
                         Attribute *

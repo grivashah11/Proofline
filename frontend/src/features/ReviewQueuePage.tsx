@@ -27,6 +27,7 @@ import {
   listAuditEvents,
   listComments,
   listReviewDecisions,
+  listWorkspaceMembers,
   recordReviewDecision,
   statusLabel,
   type AnalysisDetail,
@@ -36,6 +37,7 @@ import {
   type ContentRecord,
   type ReviewDecision,
   type ReviewDecisionRecord,
+  type WorkspaceMember,
 } from '../lib/content'
 import {
   getFindingLifecycle,
@@ -46,6 +48,7 @@ import {
 import type { WorkspaceRole } from '../lib/workspaces'
 import { useAuth } from '../lib/auth-context'
 import ClaimMatchConfidence from './ClaimMatchConfidence'
+import GovernanceInsightsPanel from './GovernanceInsightsPanel'
 import { FindingLifecyclePanel, RevisionDiffPanel, ReviewDecisionContext } from './ReviewGovernancePanels'
 import './WorkflowPages.css'
 
@@ -63,7 +66,9 @@ function getErrorMessage(error: unknown) {
 
 export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const { user } = useAuth()
+  const [activeView, setActiveView] = useState<'queue' | 'insights'>('queue')
   const [queue, setQueue] = useState<ContentRecord[]>([])
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [detail, setDetail] = useState<ContentDetail | null>(null)
   const [analysis, setAnalysis] = useState<AnalysisDetail | null>(null)
@@ -79,6 +84,7 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const [diffLoadedFor, setDiffLoadedFor] = useState('')
   const [diffError, setDiffError] = useState('')
   const [reviewComment, setReviewComment] = useState('')
+  const [reviewNoteError, setReviewNoteError] = useState('')
   const [threadComment, setThreadComment] = useState('')
   const [loadedWorkspaceId, setLoadedWorkspaceId] = useState('')
   const loading = loadedWorkspaceId !== workspaceId
@@ -93,6 +99,20 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
   const [busy, setBusy] = useState<'comment' | ReviewDecision | ''>('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  useEffect(() => {
+    let active = true
+    listWorkspaceMembers(workspaceId)
+      .then((records) => { if (active) setWorkspaceMembers(records) })
+      .catch(() => { if (active) setWorkspaceMembers([]) })
+    return () => { active = false }
+  }, [workspaceId])
+
+  const memberLabel = useCallback((memberId: string) => {
+    if (memberId === user?.id) return 'You'
+    const match = workspaceMembers.find((member) => member.user_id === memberId)
+    return match?.display_name || `Member ${memberId.slice(0, 8)}`
+  }, [user?.id, workspaceMembers])
 
   const currentRevision = useMemo(() => {
     if (!detail) return null
@@ -264,16 +284,29 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
 
   async function handleDecision(decision: ReviewDecision) {
     if (!detail || !currentRevision || !analysis || analysis.analysis.revision_id !== currentRevision.id) return
+
+    const reviewerNote = reviewComment.trim()
+    if (decision !== 'approved' && !reviewerNote) {
+      setReviewNoteError(
+        decision === 'changes_requested'
+          ? 'Add a note explaining what the Creator must change before requesting changes.'
+          : 'Add a reviewer note explaining why this submission is being rejected.',
+      )
+      return
+    }
+
+    setReviewNoteError('')
     setBusy(decision)
     setError('')
     setSuccess('')
     try {
       const result = await recordReviewDecision(workspaceId, detail.content.id, {
         decision,
-        reviewer_comment: reviewComment.trim() || null,
+        reviewer_comment: reviewerNote || null,
       })
       setSuccess(`Decision recorded: ${decisionLabel(result.decision.decision)}.`)
       setReviewComment('')
+      setReviewNoteError('')
       const records = await getReviewQueue(workspaceId)
       setQueue(records)
       setSelectedId(records[0]?.id ?? '')
@@ -305,6 +338,23 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
     )
   }
 
+  if (activeView === 'insights') {
+    return (
+      <div className="workflow-page">
+        <header className="workflow-header">
+          <div>
+            <p className="eyebrow">BRAND OWNER WORKSPACE</p>
+            <h1>Governance insights</h1>
+            <p className="workflow-subtitle">Spot repeated issues, review finding resolution and identify where brand guidance or evidence may need attention.</p>
+          </div>
+          <button className="button button-secondary" type="button" onClick={() => setActiveView('queue')}>
+            Back to review queue
+          </button>
+        </header>
+        <GovernanceInsightsPanel workspaceId={workspaceId} />
+      </div>
+    )
+  }
 
   const hasCurrentAnalysis = Boolean(analysis && currentRevision && analysis.analysis.revision_id === currentRevision.id)
   const decisionDisabled = !detail || detail.content.status !== 'in_review' || !hasCurrentAnalysis || busy !== ''
@@ -314,7 +364,7 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
       <header className="workflow-header">
         <div><p className="eyebrow">BRAND OWNER WORKSPACE</p><h1>Review queue</h1><p className="workflow-subtitle">Inspect the saved revision, read its evidence-linked findings and record an accountable human decision.</p></div>
         <div className="review-queue-header-actions">
-          <Link className="button button-secondary" to="/governance"><History size={15} /> Governance insights</Link>
+          <button className="button button-secondary" type="button" onClick={() => setActiveView('insights')}><History size={15} /> Governance insights</button>
           <button className="button button-secondary" type="button" onClick={() => void refreshQueue()}><RefreshCw size={15} /> Refresh queue</button>
         </div>
       </header>
@@ -328,7 +378,7 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
           {loading ? <div className="workflow-loading"><LoaderCircle className="spin-icon" size={21} />Loading review queue...</div> : queue.length === 0 ? <div className="workflow-empty-small"><BadgeCheck size={24} /><strong>Queue is clear</strong><span>New submissions from Creators will appear here.</span><Link to="/content">Open content reviews</Link></div> : (
             <div className="workflow-submission-list">
               {queue.map((item) => (
-                <button key={item.id} type="button" className={`workflow-submission-item ${selectedId === item.id ? 'is-selected' : ''}`} onClick={() => { setSelectedId(item.id); setError(''); setSuccess('') }}>
+                <button key={item.id} type="button" className={`workflow-submission-item ${selectedId === item.id ? 'is-selected' : ''}`} onClick={() => { setSelectedId(item.id); setReviewComment(''); setReviewNoteError(''); setThreadComment(''); setError(''); setSuccess('') }}>
                   <span className="submission-item-top"><span>{item.content_type.replace('_', ' ')}</span><span className="status-pill status-in_review">In review</span></span>
                   <strong>{item.title}</strong>
                   <span className="submission-item-context">{item.product_context || 'No product context'}</span>
@@ -349,7 +399,7 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
               <section className="workflow-section-block">
                 <div className="workflow-section-heading"><div><p className="eyebrow">EXACT SUBMITTED VERSION</p><h3>{currentRevision ? `Revision ${currentRevision.revision_number}` : 'Revision unavailable'}</h3></div>{currentRevision && <span className="revision-tag">{formatDate(currentRevision.created_at)}</span>}</div>
                 <div className="submitted-content-text">{currentRevision?.content_text || 'No revision content was returned.'}</div>
-                {currentRevision && <div className="workflow-editor-footer"><span>Revision ID: {currentRevision.id}</span><span>Submitted by {detail.content.created_by === user?.id ? 'you' : detail.content.created_by.slice(0, 8)}</span></div>}
+                {currentRevision && <div className="workflow-editor-footer"><span>Revision ID: {currentRevision.id}</span><span>Submitted by {memberLabel(detail.content.created_by)}</span></div>}
               </section>
 
               <RevisionDiffPanel
@@ -380,11 +430,11 @@ export default function ReviewQueuePage({ workspaceId, role }: Props) {
                 )}
               </section>
 
-              <section className="workflow-section-block"><div className="workflow-section-heading"><div><p className="eyebrow">REVISION DISCUSSION</p><h3>Comments</h3></div><span className="revision-tag">{comments.length}</span></div>{comments.length === 0 ? <p className="workflow-muted-copy">No comments have been added to this revision.</p> : <div className="comment-list">{comments.map((comment) => <article className="comment-item" key={comment.id}><div className="comment-avatar"><MessageSquareText size={14} /></div><div><p>{comment.body}</p><small>{comment.created_by === user?.id ? 'You' : `Member ${comment.created_by.slice(0, 8)}`} · {formatDate(comment.created_at)}</small></div></article>)}</div>}<form className="comment-form" onSubmit={handleThreadComment}><input value={threadComment} onChange={(event: { target: { value: string } }) => setThreadComment(event.target.value)} placeholder="Add a comment to this exact revision..." maxLength={5000} aria-label="Add revision comment" /><button className="button button-secondary" type="submit" disabled={!threadComment.trim() || busy !== ''}>{busy === 'comment' ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />} Comment</button></form></section>
+              <section className="workflow-section-block"><div className="workflow-section-heading"><div><p className="eyebrow">REVISION DISCUSSION</p><h3>Comments</h3></div><span className="revision-tag">{comments.length}</span></div>{comments.length === 0 ? <p className="workflow-muted-copy">No comments have been added to this revision.</p> : <div className="comment-list">{comments.map((comment) => <article className="comment-item" key={comment.id}><div className="comment-avatar"><MessageSquareText size={14} /></div><div><p>{comment.body}</p><small>{memberLabel(comment.created_by)} · {formatDate(comment.created_at)}</small></div></article>)}</div>}<form className="comment-form" onSubmit={handleThreadComment}><input value={threadComment} onChange={(event: { target: { value: string } }) => setThreadComment(event.target.value)} placeholder="Add a comment to this exact revision..." maxLength={5000} aria-label="Add revision comment" /><button className="button button-secondary" type="submit" disabled={!threadComment.trim() || busy !== ''}>{busy === 'comment' ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />} Comment</button></form></section>
 
-              <section className="review-decision-panel"><div className="review-decision-header"><div className="review-decision-icon"><ShieldCheck size={21} /></div><div><p className="eyebrow">HUMAN DECISION</p><h3>What is your review outcome?</h3><p>The decision applies to revision {currentRevision?.revision_number ?? '—'} and its latest analysis.</p></div></div><label className="workflow-field"><span>Reviewer note <small>(optional for approval; recommended for changes or rejection)</small></span><textarea value={reviewComment} onChange={(event: { target: { value: string } }) => setReviewComment(event.target.value)} rows={3} maxLength={5000} placeholder="Explain your decision and what the Creator should do next..." /></label><div className="decision-buttons"><button className="button decision-button decision-button--approve" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('approved')}>{busy === 'approved' ? <LoaderCircle className="spin-icon" size={16} /> : <ThumbsUp size={16} />} Approve</button><button className="button decision-button decision-button--changes" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('changes_requested')}>{busy === 'changes_requested' ? <LoaderCircle className="spin-icon" size={16} /> : <Undo2 size={16} />} Request changes</button><button className="button decision-button decision-button--reject" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('rejected')}>{busy === 'rejected' ? <LoaderCircle className="spin-icon" size={16} /> : <ThumbsDown size={16} />} Reject</button></div>{!hasCurrentAnalysis && <p className="workflow-helper">A review decision is disabled until an analysis for the current submitted revision is available.</p>}</section>
+              <section className="review-decision-panel"><div className="review-decision-header"><div className="review-decision-icon"><ShieldCheck size={21} /></div><div><p className="eyebrow">HUMAN DECISION</p><h3>What is your review outcome?</h3><p>The decision applies to revision {currentRevision?.revision_number ?? '—'} and its latest analysis.</p></div></div><label className="workflow-field review-note-field"><span>Reviewer note <small>(optional for approval; required for changes or rejection)</small></span><textarea value={reviewComment} onChange={(event: { target: { value: string } }) => { setReviewComment(event.target.value); if (event.target.value.trim()) setReviewNoteError('') }} rows={3} maxLength={5000} placeholder="For changes: list the exact edits the Creator should make. For rejection: explain the reason..." aria-invalid={Boolean(reviewNoteError)} aria-describedby="review-note-help review-note-error" /><small id="review-note-help" className="review-note-help">This note is saved with the decision and shown in the review history.</small>{reviewNoteError && <small id="review-note-error" className="review-note-error" role="alert">{reviewNoteError}</small>}</label><div className="decision-buttons"><button className="button decision-button decision-button--approve" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('approved')}>{busy === 'approved' ? <LoaderCircle className="spin-icon" size={16} /> : <ThumbsUp size={16} />} Approve</button><button className="button decision-button decision-button--changes" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('changes_requested')}>{busy === 'changes_requested' ? <LoaderCircle className="spin-icon" size={16} /> : <Undo2 size={16} />} Request changes</button><button className="button decision-button decision-button--reject" type="button" disabled={decisionDisabled} onClick={() => void handleDecision('rejected')}>{busy === 'rejected' ? <LoaderCircle className="spin-icon" size={16} /> : <ThumbsDown size={16} />} Reject</button></div>{!hasCurrentAnalysis && <p className="workflow-helper">A review decision is disabled until an analysis for the current submitted revision is available.</p>}</section>
 
-              <section className="workflow-section-block"><div className="workflow-section-heading"><div><p className="eyebrow">ACCOUNTABILITY</p><h3>Review & activity history</h3></div><History size={17} /></div>{decisions.length > 0 && <div className="revision-history-list review-history-list">{decisions.map((decision) => <div className="revision-history-item" key={decision.id}><span className="revision-history-number">{decision.decision === 'approved' ? '✓' : decision.decision === 'rejected' ? '×' : '↺'}</span><div><strong>{decisionLabel(decision.decision)}</strong><small>{formatDate(decision.created_at)} · reviewer {decision.reviewer_id.slice(0, 8)}</small>{decision.reviewer_comment && <p>{decision.reviewer_comment}</p>}<ReviewDecisionContext decision={decision} /></div></div>)}</div>}{events.length > 0 && <div className="audit-list">{events.slice(0, 8).map((event) => <div className="audit-item" key={event.id}><span className="audit-dot" /><div><strong>{event.event_type.replaceAll('_', ' ')}</strong><small>{formatDate(event.created_at)} · {event.actor_id === user?.id ? 'You' : event.actor_id.slice(0, 8)}</small></div></div>)}</div>}{decisions.length === 0 && events.length === 0 && <p className="workflow-muted-copy">No previous review events.</p>}</section>
+              <section className="workflow-section-block"><div className="workflow-section-heading"><div><p className="eyebrow">ACCOUNTABILITY</p><h3>Review & activity history</h3></div><History size={17} /></div>{decisions.length > 0 && <div className="revision-history-list review-history-list">{decisions.map((decision) => <div className="revision-history-item" key={decision.id}><span className="revision-history-number">{decision.decision === 'approved' ? '✓' : decision.decision === 'rejected' ? '×' : '↺'}</span><div><strong>{decisionLabel(decision.decision)}</strong><small>{formatDate(decision.created_at)} · reviewer {memberLabel(decision.reviewer_id)}</small>{decision.reviewer_comment && <p>{decision.reviewer_comment}</p>}<ReviewDecisionContext decision={decision} /></div></div>)}</div>}{events.length > 0 && <div className="audit-list">{events.slice(0, 8).map((event) => <div className="audit-item" key={event.id}><span className="audit-dot" /><div><strong>{event.event_type.replaceAll('_', ' ')}</strong><small>{formatDate(event.created_at)} · {memberLabel(event.actor_id)}</small></div></div>)}</div>}{decisions.length === 0 && events.length === 0 && <p className="workflow-muted-copy">No previous review events.</p>}</section>
             </>
           )}
         </section>

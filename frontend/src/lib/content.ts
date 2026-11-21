@@ -200,6 +200,7 @@ export type WorkspaceMember = {
   role: 'brand_owner' | 'creator'
   invited_by: string | null
   joined_at: string
+  display_name: string | null
 }
 
 export type ContentWithRevision = {
@@ -350,6 +351,20 @@ export function updateWorkspaceMember(
     method: 'PATCH',
     body: JSON.stringify({ role }),
   })
+}
+
+export function updateWorkspaceMemberDisplayName(
+  workspaceId: string,
+  userId: string,
+  display_name: string,
+) {
+  return apiRequest<WorkspaceMember>(
+    `${workspacePath(workspaceId)}/members/${userId}/display-name`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ display_name }),
+    },
+  )
 }
 
 export function removeWorkspaceMember(workspaceId: string, userId: string) {

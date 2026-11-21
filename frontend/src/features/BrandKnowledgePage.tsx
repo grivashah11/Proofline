@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
+import WorkflowNextStep from './WorkflowNextStep'
 import { ApiError, apiRequest } from '../lib/api'
 import type { WorkspaceRole } from '../lib/workspaces'
 import './BrandKnowledge.css'
@@ -873,6 +874,17 @@ export default function BrandKnowledgePage({
           </p>
         </div>
       </section>
+
+      <WorkflowNextStep
+        title={isRules
+          ? (canEdit ? 'Set your brand terminology' : 'Review your brand terminology')
+          : (canEdit ? 'Register approved product claims' : 'Explore approved product claims')}
+        description={isRules
+          ? (canEdit ? 'Define preferred, required and restricted language so your team uses consistent wording.' : 'See which words your Brand Owner prefers, requires or restricts in customer-facing content.')
+          : (canEdit ? 'Create a Claim Passport and connect the approved wording to evidence, scope and a review date.' : 'Check the approved wording, supporting evidence and scope before using a product claim.')}
+        action={isRules ? 'Continue to terminology' : 'Continue to Claim Passports'}
+        to={isRules ? '/terminology' : '/claim-passports'}
+      />
 
       <AnimatePresence>
         {modalOpen && (

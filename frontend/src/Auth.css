@@ -1281,3 +1281,58 @@
     transform: none;
   }
 }
+
+
+/* The Creator onboarding screen is rendered before workflow-page CSS is loaded.
+   Give its secondary buttons an explicit dark theme instead of browser defaults. */
+.onboarding-page .button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(190, 160, 232, 0.28);
+  border-radius: 10px;
+  background: rgba(28, 20, 42, 0.96);
+  color: #e5d8f5;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+.onboarding-page .button-secondary:hover:not(:disabled) {
+  border-color: rgba(190, 160, 232, 0.55);
+  background: rgba(105, 72, 153, 0.24);
+  color: #fff;
+}
+.onboarding-page .button-secondary:focus-visible {
+  outline: 2px solid #b99af7;
+  outline-offset: 2px;
+}
+.onboarding-page .button-secondary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.onboarding-page .onboarding-copy-id-button { min-height: 44px; padding: 0 14px; font-size: 12px; }
+.onboarding-page .onboarding-signout-button { min-height: 46px; font-size: 12px; }
+
+
+/* Keep both Creator onboarding secondary actions readable even when workflow styles load later. */
+.onboarding-page button.onboarding-copy-id-button,
+.onboarding-page button.onboarding-signout-button {
+  background: #211832;
+  background-color: #211832;
+  color: #f0e7fb;
+  border: 1px solid rgba(190, 160, 232, 0.4);
+  box-shadow: none;
+  opacity: 1;
+}
+.onboarding-page button.onboarding-copy-id-button:hover,
+.onboarding-page button.onboarding-signout-button:hover {
+  background: #302044;
+  background-color: #302044;
+  color: #ffffff;
+}
+.onboarding-page button.onboarding-copy-id-button:focus-visible,
+.onboarding-page button.onboarding-signout-button:focus-visible {
+  outline: 2px solid #c7a8ff;
+  outline-offset: 2px;
+}

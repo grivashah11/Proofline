@@ -634,8 +634,57 @@
   }
 }
 
-.cpet-load-more-wrap {
+
+/* Keep the supporting-document picker and title input on one clean baseline. */
+.cpet-upload-fields {
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+  align-items: start;
+}
+.cpet-upload-fields label {
+  grid-template-rows: minmax(19px, auto) 50px auto;
+  align-content: start;
+  gap: 7px;
+  font-size: 12px;
+}
+.cpet-upload-fields label > span {
   display: flex;
-  justify-content: center;
-  padding: 8px 0 2px;
+  min-height: 19px;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cpet-upload-fields label > span em { font-size: 10px; }
+.cpet-upload-fields input[type="file"],
+.cpet-upload-fields input[type="text"],
+.cpet-upload-fields input:not([type]) {
+  box-sizing: border-box;
+  height: 50px;
+  min-height: 50px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.cpet-upload-fields input[type="file"] {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.cpet-upload-fields input[type="file"]::file-selector-button {
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.cpet-upload-fields label small { font-size: 10px; line-height: 1.5; }
+.cpet-upload-actions p { font-size: 11px; line-height: 1.6; }
+.cpet-documents-heading > strong { font-size: 12px; }
+.cpet-empty-documents strong { font-size: 12px; }
+.cpet-empty-documents span { font-size: 11px; }
+.cpet-document-copy strong, .cpet-reminder-copy strong { font-size: 12px; }
+.cpet-document-copy span, .cpet-document-copy small, .cpet-reminder-copy span { font-size: 11px; }
+.cpet-segment-heading > span:first-child { font-size: 11px; }
+.cpet-text-button { font-size: 11px; }
+
+@media (max-width: 700px) {
+  .cpet-upload-fields { grid-template-columns: 1fr; }
+  .cpet-upload-fields label { grid-template-rows: auto 50px auto; }
 }

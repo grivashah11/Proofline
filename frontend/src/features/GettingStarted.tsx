@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, Circle, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { apiRequest } from '../lib/api'
-import { useAuth } from '../lib/auth-context'
 import type { WorkspaceRole } from '../lib/workspaces'
 import './GettingStarted.css'
 
@@ -25,7 +24,6 @@ type MemberSummary = {
 
 type SubmissionSummary = {
   status: string
-  created_by: string
 }
 
 type SetupSnapshot = {
@@ -65,7 +63,6 @@ const initialSnapshot: SetupSnapshot = {
 async function fetchSetupSnapshot(
   workspaceId: string,
   role: WorkspaceRole,
-  currentUserId: string | null,
 ): Promise<SetupLoadResult> {
   const base = `/api/v1/workspaces/${workspaceId}`
   const results = await Promise.allSettled([
@@ -98,10 +95,7 @@ async function fetchSetupSnapshot(
           : null,
       firstReview:
         submissions.status === 'fulfilled'
-          ? submissions.value.some((item) =>
-              ['approved', 'changes_requested', 'rejected'].includes(item.status) &&
-              (role === 'brand_owner' || Boolean(currentUserId && item.created_by === currentUserId)),
-            )
+          ? submissions.value.some((item) => ['approved', 'changes_requested', 'rejected'].includes(item.status))
           : null,
     },
     loadError: results.some((result) => result.status === 'rejected'),
@@ -115,7 +109,6 @@ export default function GettingStarted({
   workspaceId: string
   role: WorkspaceRole
 }) {
-  const { user } = useAuth()
   const [snapshot, setSnapshot] = useState<SetupSnapshot>(initialSnapshot)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -126,7 +119,7 @@ export default function GettingStarted({
   useEffect(() => {
     let active = true
 
-    fetchSetupSnapshot(workspaceId, role, user?.id ?? null)
+    fetchSetupSnapshot(workspaceId, role)
       .then((result) => {
         if (!active) return
         setSnapshot(result.snapshot)
@@ -142,7 +135,7 @@ export default function GettingStarted({
     return () => {
       active = false
     }
-  }, [workspaceId, role, user?.id])
+  }, [workspaceId, role])
 
   // Refresh is initiated by a user interaction, so synchronous loading-state
   // updates are appropriate here.
@@ -150,7 +143,7 @@ export default function GettingStarted({
     setLoading(true)
     setLoadError(false)
 
-    fetchSetupSnapshot(workspaceId, role, user?.id ?? null)
+    fetchSetupSnapshot(workspaceId, role)
       .then((result) => {
         setSnapshot(result.snapshot)
         setLoadError(result.loadError)
@@ -161,7 +154,7 @@ export default function GettingStarted({
       .finally(() => {
         setLoading(false)
       })
-  }, [workspaceId, role, user?.id])
+  }, [workspaceId, role])
 
   const steps = useMemo<SetupStep[]>(() => [
     {
@@ -218,16 +211,16 @@ export default function GettingStarted({
   const allComplete = completed === steps.length
 
   return (
-    <section id="getting-started-panel" className="getting-started-panel" aria-labelledby="getting-started-title" tabIndex={-1}>
+    <section className="getting-started-panel" aria-labelledby="getting-started-title">
       <div className="getting-started-heading">
         <div className="getting-started-heading-copy">
           <span className="getting-started-icon"><Sparkles size={17} /></span>
           <div>
             <p className="eyebrow">A CLEAR PLACE TO START</p>
             <h2 id="getting-started-title">{allComplete ? 'Your workspace is ready' : 'Your next step'}</h2>
-            <p>{allComplete
-              ? 'Your core setup is complete. You can revisit any step whenever your brand knowledge changes.'
-              : 'Follow the recommended next action. Your progress is checked against this workspace.'}</p>
+            <p>{role === 'creator'
+              ? (allComplete ? 'You have completed the first review cycle. Return here whenever you need a reminder of the workflow.' : 'Start by learning the brand guidance, then prepare a draft and send it to your Brand Owner.')
+              : (allComplete ? 'Your core setup is complete. You can revisit any step whenever your brand knowledge changes.' : 'Follow the recommended next action. Your progress is checked against this workspace.')}</p>
           </div>
         </div>
         <button className="getting-started-refresh" type="button" onClick={handleRefresh} disabled={loading} aria-label="Refresh setup progress">

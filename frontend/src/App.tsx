@@ -1,11 +1,10 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   Activity,
   ArrowRight,
   ArrowLeft,
   ArrowUpRight,
   BadgeCheck,
-  BarChart3,
   BookOpenCheck,
   CheckCircle2,
   Clipboard,
@@ -34,6 +33,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
 } from 'react-router-dom'
 import { ApiError, apiRequest } from './lib/api'
 import { listContents, statusLabel, type ContentRecord } from './lib/content'
@@ -59,10 +59,7 @@ const ContentReviewsPage = lazy(() => import('./features/ContentReviewsPage'))
 const ReviewQueuePage = lazy(() => import('./features/ReviewQueuePage'))
 const TeamPage = lazy(() => import('./features/TeamPage'))
 const ImagesPage = lazy(() => import('./features/ImagesPage'))
-const GovernanceInsightsPage = lazy(() => import('./features/GovernanceInsightsPage'))
 
-
-type ApiState = 'checking' | 'online' | 'offline'
 
 type NavItem = {
   label: string
@@ -78,7 +75,6 @@ const navItems: NavItem[] = [
   { label: 'Claim Passports', to: '/claim-passports', icon: BadgeCheck, group: 'setup' },
   { label: 'Content reviews', to: '/content', icon: FileCheck2, group: 'review' },
   { label: 'Review queue', to: '/reviews', icon: UsersRound, group: 'review' },
-  { label: 'Governance insights', to: '/governance', icon: BarChart3, group: 'review' },
   { label: 'Team members', to: '/team', icon: UsersRound, group: 'manage' },
   { label: 'Images & assets', to: '/images', icon: ImageIcon, group: 'manage' },
 ]
@@ -384,10 +380,22 @@ function AuthScreen() {
 
 function WorkspaceGate() {
   const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+  const lastOverviewUserId = useRef<string | null>(null)
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  // Navigate to Overview once when a different account signs in. In
+  // BrowserRouter mode, useNavigate can get a new function identity when the
+  // location changes; the ref prevents that dependency change from redirecting
+  // every subsequent page navigation back to Overview.
+  useEffect(() => {
+    if (!user?.id || lastOverviewUserId.current === user.id) return
+    lastOverviewUserId.current = user.id
+    navigate('/', { replace: true })
+  }, [user?.id, navigate])
 
   useEffect(() => {
     let active = true
@@ -894,7 +902,6 @@ function AppLayout({
   const location = useLocation()
   const { user, signOut } = useAuth()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [apiState, setApiState] = useState<ApiState>('checking')
   const [signingOut, setSigningOut] = useState(false)
   const [signOutError, setSignOutError] = useState('')
 
@@ -907,19 +914,8 @@ function AppLayout({
     navItems[0]
 
   useEffect(() => {
-    let active = true
-
-    apiRequest<unknown>('/api/v1/health')
-      .then(() => {
-        if (active) setApiState('online')
-      })
-      .catch(() => {
-        if (active) setApiState('offline')
-      })
-
-    return () => {
-      active = false
-    }
+    // Keep the API warm without displaying internal connection status.
+    void apiRequest<unknown>('/api/v1/health').catch(() => undefined)
   }, [])
 
   const handleSignOut = async () => {
@@ -1007,7 +1003,7 @@ function AppLayout({
           {navGroups.map((group) => {
             const items = navItems.filter((item) =>
               item.group === group.key &&
-              (!['/reviews', '/governance'].includes(item.to) || selected.role === 'brand_owner'),
+              (item.to !== '/reviews' || selected.role === 'brand_owner'),
             )
 
             if (items.length === 0) return null
@@ -1071,7 +1067,6 @@ function AppLayout({
           </div>
 
           <div className="topbar-right">
-            <ApiStatus state={apiState} />
             <div className="user-email" title={user?.email ?? ''}>
               {user?.email ?? 'Signed in'}
             </div>
@@ -1135,10 +1130,6 @@ function AppLayout({
                     element={<ReviewQueuePage workspaceId={selected.workspace.id} role={selected.role} />}
                   />
                   <Route
-                    path="/governance"
-                    element={<GovernanceInsightsPage workspaceId={selected.workspace.id} role={selected.role} />}
-                  />
-                  <Route
                     path="/team"
                     element={<TeamPage workspaceId={selected.workspace.id} role={selected.role} />}
                   />
@@ -1157,20 +1148,6 @@ function AppLayout({
   )
 }
 
-function ApiStatus({ state }: { state: ApiState }) {
-  const label = {
-    checking: 'Checking backend',
-    online: 'Backend connected',
-    offline: 'Backend offline',
-  }[state]
-
-  return (
-    <div className={`api-status api-status--${state}`}>
-      <span className="api-status-dot" />
-      <span>{label}</span>
-    </div>
-  )
-}
 
 function DashboardPage({ workspace, role }: { workspace: WorkspaceRecord; role: WorkspaceRole }) {
   const [recentSubmissions, setRecentSubmissions] = useState<ContentRecord[]>([])
@@ -1205,23 +1182,18 @@ function DashboardPage({ workspace, role }: { workspace: WorkspaceRecord; role: 
           <h1>Welcome to {workspace.name}</h1>
           <p className="welcome-description">
             {role === 'brand_owner'
-              ? 'Start with brand rules and approved claims, then invite a Creator and review their draft.'
-              : 'Submit a draft, review the findings, make corrections and send your revision to the Brand Owner.'}
+              ? 'Set the standards, check a draft and make an informed review decision.'
+              : 'Start with the brand guidance, check your draft against approved claims and send the exact revision to your Brand Owner.'}
           </p>
         </div>
-        {role === 'brand_owner' ? (
-          <a className="button button-primary welcome-button" href="#getting-started-panel">
-            <Sparkles size={17} />
-            Follow setup steps
-            <ArrowRight size={17} />
-          </a>
-        ) : (
-          <Link className="button button-primary welcome-button" to="/content">
-            <FileCheck2 size={17} />
-            Submit content
-            <ArrowRight size={17} />
-          </Link>
-        )}
+        <Link
+          className="button button-primary welcome-button"
+          to={role === 'brand_owner' ? '/reviews' : '/content'}
+        >
+          {role === 'brand_owner' ? <UsersRound size={17} /> : <FileCheck2 size={17} />}
+          {role === 'brand_owner' ? 'Open review queue' : 'Submit content'}
+          <ArrowRight size={17} />
+        </Link>
       </section>
 
       <GettingStarted workspaceId={workspace.id} role={role} />

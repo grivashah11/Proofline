@@ -10,11 +10,45 @@ function displayValue(value: string | null | undefined) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function formatNormalizedValue(
+  numericValue: string | null,
+  unit: string | null,
+  unitDimension: string | null,
+  fallbackText: string | null,
+) {
+  if (!numericValue) return fallbackText
+
+  const numeric = Number(numericValue)
+  const normalizedUnit = unit?.trim().toLowerCase()
+  if (
+    Number.isFinite(numeric) &&
+    unitDimension?.trim().toLowerCase() === 'time' &&
+    (normalizedUnit === 'second' || normalizedUnit === 'seconds' || normalizedUnit === 's')
+  ) {
+    const formattedSeconds = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(numeric)
+    if (numeric >= 3600 && numeric % 3600 === 0) {
+      const hours = numeric / 3600
+      return `${hours} ${hours === 1 ? 'hour' : 'hours'} (${formattedSeconds} seconds)`
+    }
+    if (numeric >= 60 && numeric % 60 === 0) {
+      const minutes = numeric / 60
+      return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} (${formattedSeconds} seconds)`
+    }
+  }
+
+  return [numericValue, unit].filter(Boolean).join(' ') || fallbackText
+}
+
 function normalizedRows(claim: NormalizedClaim): DetailRow[] {
   const numericValue = displayValue(claim.numeric_value)
   const textualValue = displayValue(claim.value_text)
   const unit = displayValue(claim.unit)
-  const combinedValue = [numericValue || textualValue, unit].filter(Boolean).join(' ')
+  const combinedValue = formatNormalizedValue(
+    numericValue,
+    unit,
+    displayValue(claim.unit_dimension),
+    textualValue,
+  )
 
   return [
     { label: 'Subject', value: displayValue(claim.subject) },
@@ -31,37 +65,16 @@ function normalizedRows(claim: NormalizedClaim): DetailRow[] {
   ].filter((row) => row.value !== null)
 }
 
-function FactorStatus({
-  factorName,
-  applicable,
-  matched,
-}: {
-  factorName: string
-  applicable: boolean
-  matched: boolean | null
-}) {
+function FactorStatus({ applicable, matched }: { applicable: boolean; matched: boolean | null }) {
   if (!applicable) {
     return <span className="match-factor-status match-factor-status--neutral"><MinusCircle size={12} /> Not applicable</span>
   }
-
-  // A comparable value/unit is not necessarily an agreeing value/unit.
-  // The finding outcome and explanation communicate agreement or conflict.
-  if (factorName === 'value' || factorName === 'unit') {
-    if (matched === true) {
-      return <span className="match-factor-status match-factor-status--matched"><CheckCircle2 size={12} /> Comparable</span>
-    }
-    if (matched === false) {
-      return <span className="match-factor-status match-factor-status--different"><CircleAlert size={12} /> Not comparable</span>
-    }
-  } else {
-    if (matched === true) {
-      return <span className="match-factor-status match-factor-status--matched"><CheckCircle2 size={12} /> Matched</span>
-    }
-    if (matched === false) {
-      return <span className="match-factor-status match-factor-status--different"><CircleAlert size={12} /> Difference</span>
-    }
+  if (matched === true) {
+    return <span className="match-factor-status match-factor-status--matched"><CheckCircle2 size={12} /> Matched</span>
   }
-
+  if (matched === false) {
+    return <span className="match-factor-status match-factor-status--different"><CircleAlert size={12} /> Difference</span>
+  }
   return <span className="match-factor-status match-factor-status--neutral"><MinusCircle size={12} /> Not compared</span>
 }
 
@@ -82,7 +95,7 @@ export default function ClaimMatchConfidence({ finding }: Props) {
       <div className="match-confidence-heading">
         <div>
           <span className="match-confidence-eyebrow">IMPROVEMENT 2 · CLAIM MATCHING</span>
-          <h4>Comparison confidence</h4>
+          <h4>Claim field comparison</h4>
         </div>
         {hasMetadata && band && (
           <span className={`match-confidence-band match-confidence-band--${band}`}>
@@ -90,15 +103,6 @@ export default function ClaimMatchConfidence({ finding }: Props) {
           </span>
         )}
       </div>
-
-      {finding.outcome === 'conflict' && (
-        <div className="match-confidence-conflict-note" role="note">
-          <CircleAlert size={16} />
-          <p>
-            <strong>The draft conflicts with the approved Passport.</strong> A value marked “Comparable” can still be different from the approved value. Compare the draft excerpt and approved wording shown with this finding before deciding what to change.
-          </p>
-        </div>
-      )}
 
       {!hasMetadata ? (
         <div className="match-confidence-missing">
@@ -110,7 +114,7 @@ export default function ClaimMatchConfidence({ finding }: Props) {
           {score !== null && (
             <div className="match-confidence-score-row">
               <strong>{Math.round(score * 100)}%</strong>
-              <span>comparison confidence</span>
+              <span>field comparability · not claim accuracy</span>
               <div
                 className="match-confidence-track"
                 role="meter"
@@ -146,7 +150,7 @@ export default function ClaimMatchConfidence({ finding }: Props) {
                   <article className="match-factor-item" key={factor.name}>
                     <div className="match-factor-topline">
                       <strong>{factor.label}</strong>
-                      <FactorStatus factorName={factor.name} applicable={factor.applicable} matched={factor.matched} />
+                      <FactorStatus applicable={factor.applicable} matched={factor.matched} />
                     </div>
                     <p>{factor.explanation}</p>
                     <small>Comparison weight: {Math.round(factor.weight * 100)}%</small>

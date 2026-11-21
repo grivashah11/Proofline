@@ -1641,3 +1641,96 @@
   color: #897c98;
   font-style: italic;
 }
+
+
+/* Reviewer decisions: make the note requirement unmistakable and errors visible. */
+.review-note-field textarea[aria-invalid="true"] {
+  border-color: rgba(251, 130, 158, 0.72);
+  box-shadow: 0 0 0 3px rgba(251, 130, 158, 0.1);
+}
+.review-note-help {
+  color: #a99dbb;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.review-note-error {
+  color: #ff9fb3;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+
+/* Clear hand-off between the major setup screens. */
+.workflow-next-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px 0 4px;
+  padding: 17px 19px;
+  border: 1px solid rgba(174, 143, 246, 0.25);
+  border-radius: 13px;
+  background: linear-gradient(110deg, rgba(91, 61, 136, 0.18), rgba(27, 19, 40, 0.82));
+}
+.workflow-next-step-copy { min-width: 0; }
+.workflow-next-step-eyebrow { display: block; margin-bottom: 5px; color: #b69ae7; font-size: 10px; font-weight: 760; letter-spacing: 1.1px; }
+.workflow-next-step-copy > strong { display: block; color: #f1eaff; font-size: 15px; font-weight: 680; }
+.workflow-next-step-copy p { margin: 5px 0 0; color: #b9adc9; font-size: 12px; line-height: 1.6; }
+.workflow-next-step-action { flex: 0 0 auto; min-height: 44px; font-size: 12px; }
+
+/* Form controls and supporting text should remain comfortable to read. */
+.workflow-page .workflow-subtitle,
+.workflow-page .workflow-muted-copy,
+.workflow-page .workflow-helper { font-size: 13px; line-height: 1.65; }
+.workflow-page .workflow-field > span { font-size: 13px; }
+.workflow-page .workflow-field input,
+.workflow-page .workflow-field select,
+.workflow-page .workflow-field textarea,
+.workflow-page .workflow-filter-row select,
+.workflow-page .comment-form input,
+.workflow-page .add-member-form input { font-size: 14px; }
+.workflow-page .workflow-field input,
+.workflow-page .workflow-field select,
+.workflow-page .workflow-filter-row select,
+.workflow-page .add-member-form input { min-height: 44px; }
+.workflow-page .button { min-height: 44px; font-size: 12px; }
+
+@media (max-width: 640px) {
+  .workflow-next-step { align-items: stretch; flex-direction: column; }
+  .workflow-next-step-action { width: 100%; }
+}
+
+
+/* Workspace member names: readable, compact inline editing for Brand Owners. */
+.member-detail > strong { font-size: 13px; }
+.member-detail > small { font-size: 10px; }
+.member-display-name-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 7px;
+}
+.member-display-name-form label { display: grid; gap: 5px; min-width: 0; }
+.member-display-name-form label span { color: #bdb0cd; font-size: 11px; }
+.member-display-name-form input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: rgba(10, 7, 17, 0.72);
+  color: #f1eaff;
+  font-size: 13px;
+}
+.member-display-name-form .button { min-height: 40px; font-size: 11px; }
+.content-type-help { display: block; margin-top: 5px; color: #a99bb9; font-size: 11px; line-height: 1.55; }
+@media (max-width: 700px) {
+  .member-row { align-items: flex-start; flex-wrap: wrap; }
+  .member-display-name-form { grid-template-columns: 1fr 1fr; }
+  .member-display-name-form label { grid-column: 1 / -1; }
+  .member-display-name-form button { width: 100%; }
+}
+
+.member-name-rollout-note { margin: 0 0 12px; color: #b5a5c9; font-size: 11px; line-height: 1.55; }
